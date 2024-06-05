@@ -1,0 +1,6 @@
+boto3
+botocore
+pandas
+pytz
+tqdm
+tabulate
