@@ -54,8 +54,8 @@ python main.py -p my-aws-profile -b s3://my-bucket/AWSLogs/123456789012/elasticl
 다음은 AWS SSO 프로파일을 설정하기 위한 `~/.aws/config` 파일의 예제입니다:
 
 ```ini
-[sso-session eunch]
-sso_start_url = https://eeert.awsapps.com/start/#/
+[sso-session example1]
+sso_start_url = https://example1.awsapps.com/start/#/
 sso_region = ap-northeast-2
 sso_registration_scopes = sso:account:access
 ```
