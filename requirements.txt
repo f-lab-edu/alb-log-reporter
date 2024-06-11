@@ -1,6 +1,6 @@
 boto3
-botocore
 pandas
+openpyxl
+xlsxwriter
 pytz
 tqdm
-tabulate

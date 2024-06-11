@@ -5,13 +5,13 @@ import os
 import re
 import shutil
 from collections import defaultdict, Counter
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pandas as pd
 import pytz
 from tqdm import tqdm
 
-from src.utils import create_directory, clean_directory, parse_time, get_timezone_for_region, REGION_TIMEZONE_MAP
+from src.utils import create_directory, clean_directory
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -19,27 +19,21 @@ logger = logging.getLogger()
 
 
 class ELBLogAnalyzer:
-    def __init__(self, s3_client, bucket_name, prefix, start_date, end_date, start_time=None, end_time=None,
-                 region_name='ap-northeast-2'):
+    def __init__(self, s3_client, bucket_name, prefix, start_datetime, end_datetime, timezone='UTC'):
         self.s3_client = s3_client
         self.bucket_name = bucket_name
         self.prefix = prefix.strip('/')
-        self.start_date = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=pytz.utc)
-        self.end_date = datetime.strptime(end_date, '%Y-%m-%d').replace(
-            tzinfo=pytz.utc) if end_date else self.start_date
-        self.start_time = parse_time(start_time)
-        self.end_time = parse_time(end_time)
-        self.timezone = get_timezone_for_region(region_name, REGION_TIMEZONE_MAP)
+        self.timezone = pytz.timezone(timezone)
+        self.start_datetime = self.timezone.localize(datetime.strptime(start_datetime, '%Y-%m-%d %H:%M'))
+        self.end_datetime = self.timezone.localize(datetime.strptime(end_datetime, '%Y-%m-%d %H:%M'))
+        # UTC 변환
+        self.start_datetime_utc = self.start_datetime.astimezone(pytz.utc)
+        self.end_datetime_utc = self.end_datetime.astimezone(pytz.utc)
 
     def download_logs(self):
-        gz_directory = create_directory('data/logs')
+        gz_directory = create_directory('./data/log')
         clean_directory(gz_directory)  # Clear existing log files
-        logger.info("Downloading logs from S3 bucket...")
-
-        start_datetime = datetime.combine(self.start_date, self.start_time).replace(
-            tzinfo=pytz.utc) if self.start_time else self.start_date
-        end_datetime = datetime.combine(self.end_date, self.end_time).replace(
-            tzinfo=pytz.utc) if self.end_time else self.end_date + timedelta(days=1)
+        logger.info(f"Downloading logs from S3 bucket from {self.start_datetime_utc} to {self.end_datetime_utc}...")
 
         paginator = self.s3_client.get_paginator('list_objects_v2')
         files_to_download = []
@@ -49,12 +43,13 @@ class ELBLogAnalyzer:
                 logger.warning(f"No logs found in the specified prefix: s3://{self.bucket_name}/{self.prefix}")
                 continue
             for obj in page['Contents']:
-                if start_datetime <= obj['LastModified'] <= end_datetime:
+                last_modified = obj['LastModified'].replace(tzinfo=pytz.utc)
+                if self.start_datetime_utc <= last_modified <= self.end_datetime_utc:
                     files_to_download.append(obj['Key'])
 
         total_files = len(files_to_download)
         if total_files == 0:
-            logger.warning(f"No logs found in the specified time range: {start_datetime} to {end_datetime}")
+            logger.warning(f"No logs found in the specified time range: {self.start_datetime} to {self.end_datetime}")
             return gz_directory
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
@@ -63,14 +58,16 @@ class ELBLogAnalyzer:
             for future in tqdm(concurrent.futures.as_completed(futures), total=total_files, desc="Downloading",
                                unit="file", ncols=100,
                                bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}%"):
-                future.result()  # Catch exceptions
+                try:
+                    future.result()  # Catch exceptions
+                except Exception as e:
+                    logger.error(f"Exception during log download: {e}")
 
         logger.info("Download complete.")
         return gz_directory
 
     def _download_log_file(self, file_key, gz_directory):
         local_filename = os.path.join(gz_directory, os.path.basename(file_key))
-        create_directory(gz_directory)  # Ensure directory exists
         try:
             self.s3_client.download_file(self.bucket_name, file_key, local_filename)
         except self.s3_client.exceptions.ClientError as e:
@@ -81,7 +78,7 @@ class ELBLogAnalyzer:
                 logger.error(f"Download failed for s3://{self.bucket_name}/{file_key}. Reason: {e}")
 
     def decompress_logs(self, gz_directory):
-        log_directory = create_directory('data/parsed')
+        log_directory = create_directory('./data/parsed')
         clean_directory(log_directory)  # Clear existing parsed files
         logger.info("Decompressing log files...")
 
@@ -98,7 +95,6 @@ class ELBLogAnalyzer:
     def _decompress_log_file(self, gz_file, gz_directory, log_directory):
         gz_file_path = os.path.join(gz_directory, gz_file)
         log_file_path = os.path.join(log_directory, gz_file[:-3] + '.log')
-        create_directory(log_directory)  # Ensure directory exists
         try:
             with gzip.open(gz_file_path, 'rb') as f_in:
                 with open(log_file_path, 'wb') as f_out:
@@ -141,6 +137,13 @@ class ELBLogAnalyzer:
 
         data = match.groupdict()
 
+        request_parts = re.match(r'(?P<method>\S+)\s+(?P<url>\S+)\s+(?P<version>\S+)', data['request'])
+        if not request_parts:
+            logger.warning(f"Invalid request format: {data['request']}")
+            return None
+
+        url = request_parts.group('url')
+
         request_processing_time = self._parse_time_field(data['request_processing_time'])
         target_processing_time = self._parse_time_field(data['target_processing_time'])
         response_processing_time = self._parse_time_field(data['response_processing_time'])
@@ -149,17 +152,13 @@ class ELBLogAnalyzer:
             return None
 
         total_response_time = request_processing_time + target_processing_time + response_processing_time
-        timestamp = self._convert_to_kst(self._parse_timestamp(data['timestamp']))
-
-        if self.start_time and self.end_time:
-            if not self._is_within_time_range(timestamp):
-                return None
+        timestamp = self._convert_to_timezone(self._parse_timestamp(data['timestamp']))
 
         if data['user_agent'] == '-':
             return None
 
         return {
-            'timestamp': timestamp,
+            'timestamp': self._remove_timezone(timestamp),
             'client_ip': data['client_ip'].split(':')[0],
             'target_ip': data['target_ip'].split(':')[0] if data['target_ip'] != '-' else None,
             'request_processing_time': request_processing_time,
@@ -169,7 +168,7 @@ class ELBLogAnalyzer:
             'target_status_code': data['target_status_code'],
             'received_bytes': data['received_bytes'],
             'sent_bytes': data['sent_bytes'],
-            'request': data['request'],
+            'request': url,  # Only store the URL part
             'total_response_time': total_response_time,
             'user_agent': data['user_agent'],
             'ssl_cipher': data['ssl_cipher'],
@@ -200,17 +199,11 @@ class ELBLogAnalyzer:
     def _parse_timestamp(self, timestamp_str):
         return datetime.strptime(timestamp_str, '%Y-%m-%dT%H:%M:%S.%fZ').replace(tzinfo=pytz.utc)
 
-    def _convert_to_kst(self, timestamp):
-        if self.timezone.zone == 'Asia/Seoul':
-            return timestamp.astimezone(pytz.timezone('Asia/Seoul'))
-        return timestamp
+    def _convert_to_timezone(self, timestamp):
+        return timestamp.astimezone(self.timezone)
 
-    def _is_within_time_range(self, timestamp):
-        start_datetime = datetime.combine(self.start_date, self.start_time).replace(
-            tzinfo=pytz.utc) if self.start_time else datetime.min.replace(tzinfo=pytz.utc)
-        end_datetime = datetime.combine(self.end_date, self.end_time).replace(
-            tzinfo=pytz.utc) if self.end_time else datetime.max.replace(tzinfo=pytz.utc)
-        return start_datetime <= timestamp <= end_datetime
+    def _remove_timezone(self, timestamp):
+        return timestamp.replace(tzinfo=None)
 
     def analyze_logs(self, parsed_logs):
         elb_2xx_counts = defaultdict(int)
@@ -255,8 +248,9 @@ class ELBLogAnalyzer:
                 log['timestamp'], log['client_ip'], log['target_ip'], log['request'], log['elb_status_code'],
                 log['target_status_code'])] += 1
         elif log['elb_status_code'].startswith('3'):
-            elb_3xx_counts[(log['timestamp'], log['client_ip'], log['target_ip'], log['request'], log['redirect_url'],
-                            log['elb_status_code'], log['target_status_code'])] += 1
+            elb_3xx_counts[(
+                log['timestamp'], log['client_ip'], log['target_ip'], log['request'], log['redirect_url'],
+                log['elb_status_code'], log['target_status_code'])] += 1
         elif log['elb_status_code'].startswith('4'):
             elb_4xx_counts[(
                 log['timestamp'], log['client_ip'], log['target_ip'], log['request'], log['elb_status_code'],
@@ -269,11 +263,11 @@ class ELBLogAnalyzer:
         if log['target_status_code'].startswith('4'):
             target_4xx_counts[(
                 log['timestamp'], log['client_ip'], log['target_ip'], log['request'], log['elb_status_code'],
-                log['target_status_code_list'])] += 1
+                log['target_status_code'])] += 1
         elif log['target_status_code'].startswith('5'):
             target_5xx_counts[(
                 log['timestamp'], log['client_ip'], log['target_ip'], log['request'], log['elb_status_code'],
-                log['target_status_code_list'])] += 1
+                log['target_status_code'])] += 1
 
         if log['total_response_time'] >= 1.0:
             long_response_times.append(log)
@@ -282,24 +276,28 @@ class ELBLogAnalyzer:
         df = pd.DataFrame(
             [(val, key[1], key[3], key[4], key[5]) for key, val in status_code_counts.items()],
             columns=['Count', 'Client IP', 'Request', 'ELB Status Code', 'Backend Status Code']
-        ).sort_values('Count', ascending=False)
-        return df
+        )
+        grouped_df = df.groupby(['Client IP', 'Request', 'ELB Status Code', 'Backend Status Code']).sum().reset_index()
+        sorted_df = grouped_df.sort_values('Count', ascending=False)
+        return sorted_df
 
-    def _create_3xx_status_code_dataframe(self, status_code_counts):
+    def _create_3xx_status_code_dataframe(self, status_3xx_code_counts):
         df = pd.DataFrame(
-            [(val, key[1], key[3], key[4], key[5], key[6]) for key, val in status_code_counts.items()],
-            columns=['Count', 'Client IP', 'Request', 'ELB Status Code', 'Backend Status Code']
-        ).sort_values('Count', ascending=False)
-        return df
+            [(val, key[1], key[3], key[4], key[5], key[6]) for key, val in status_3xx_code_counts.items()],
+            columns=['Count', 'Client IP', 'Request', 'Redirect URL', 'ELB Status Code', 'Backend Status Code']
+        )
+        grouped_df = df.groupby(
+            ['Client IP', 'Request', 'Redirect URL', 'ELB Status Code', 'Backend Status Code']).sum().reset_index()
+        sorted_df = grouped_df.sort_values('Count', ascending=False)
+        return sorted_df
 
     def _create_timestamp_dataframe(self, status_code_counts):
         df = pd.DataFrame(
-            [(key[0], key[1], key[2], key[3], key[4], key[5], val) for key, val in status_code_counts.items()],
-            columns=['Timestamp', 'Client IP', 'Target IP', 'Request URL', 'ELB Status Code', 'Backend Status Code',
-                     'Count']
+            [(key[0], key[1], key[3], key[4], key[5]) for key, val in status_code_counts.items()],
+            columns=['Timestamp', 'Client IP', 'Request URL', 'ELB Status Code', 'Backend Status Code']
         ).sort_values('Timestamp')
         df['Timestamp'] = pd.to_datetime(df['Timestamp']).dt.tz_localize(None)  # Make datetimes timezone-unaware
-        return df[['Timestamp', 'Client IP', 'Target IP', 'Request URL', 'ELB Status Code', 'Backend Status Code']]
+        return df[['Timestamp', 'Client IP', 'Request URL', 'ELB Status Code', 'Backend Status Code']]
 
     def _create_long_response_times_dataframe(self, long_response_times):
         df = pd.DataFrame(long_response_times)
@@ -308,34 +306,28 @@ class ELBLogAnalyzer:
         return df.head(100)[['total_response_time', 'timestamp', 'client_ip', 'target_ip', 'request']]
 
     def _create_top_client_ips_dataframe(self, top_client_ips):
-        df = pd.DataFrame(top_client_ips, columns=['Client IP', 'Count'])
-        return df
+        return pd.DataFrame(top_client_ips, columns=['Client IP', 'Count'])
 
     def _create_top_user_agents_dataframe(self, top_user_agents):
-        df = pd.DataFrame(top_user_agents, columns=['User Agent', 'Count'])
-        return df
+        return pd.DataFrame(top_user_agents, columns=['User Agent', 'Count'])
 
-    def save_to_excel(self, analysis_data, prefix, start_datetime):
-        output_file = self._create_output_filename(prefix, start_datetime)
-        if os.path.exists(output_file):
-            logger.warning(f"{output_file} already exists. It will be overwritten.")
-        with pd.ExcelWriter(output_file) as writer:
-            for sheet_name, df in analysis_data.items():
-                df.to_excel(writer, sheet_name=sheet_name, index=False)
-        logger.info(f"Analysis results saved to {output_file}.")
-        print(f"Analysis results saved to {output_file}.")
+    def save_to_excel(self, data, prefix, script_start_time):
+        timestamp = script_start_time.strftime('%Y%m%d_%H%M%S')
+        output_directory = create_directory(f'./data/output/{timestamp}')
+        output_path = os.path.join(output_directory, f'{prefix.replace("/", "_")}_report.xlsx')
 
-    def _create_output_filename(self, prefix, start_datetime):
-        current_directory = os.getcwd()
-        directory = os.path.join(current_directory, "reports", "ELBLogAnalysis",
-                                 start_datetime.strftime('%Y%m%d_%H%M%S'))
-        create_directory(directory)
-        filename = f"{prefix.replace('/', '_')}_{start_datetime.strftime('%Y%m%d_%H%M%S')}.xlsx"
-        return os.path.join(directory, filename)
+        with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
+            for sheet_name, df in data.items():
+                df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+
+                # 자동 열 너비 조정
+                for column in df:
+                    column_length = max(df[column].astype(str).map(len).max(), len(column))
+                    col_idx = df.columns.get_loc(column)
+                    writer.sheets[sheet_name].set_column(col_idx, col_idx, column_length)
+
+        logger.info(f"Report saved to {output_path}")
 
     def clean_up(self, directories):
-        logger.info("Cleaning up temporary files...")
         for directory in directories:
-            if 'report' not in directory:  # Skip the report directory
-                clean_directory(directory)
-        logger.info("Cleanup complete.")
+            clean_directory(directory)
