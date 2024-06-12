@@ -13,7 +13,6 @@ from tqdm import tqdm
 
 from src.utils import create_directory, clean_directory
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger()
 
@@ -25,7 +24,10 @@ class ELBLogAnalyzer:
         self.prefix = prefix.strip('/')
         self.timezone = pytz.timezone(timezone)
         self.start_datetime = self.timezone.localize(datetime.strptime(start_datetime, '%Y-%m-%d %H:%M'))
-        self.end_datetime = self.timezone.localize(datetime.strptime(end_datetime, '%Y-%m-%d %H:%M'))
+        current_time = datetime.now(self.timezone)
+        self.end_datetime = self.timezone.localize(datetime.strptime(end_datetime, '%Y-%m-%d %H:%M')) if end_datetime else current_time
+        if self.end_datetime < self.start_datetime:
+            self.end_datetime = current_time
         # UTC 변환
         self.start_datetime_utc = self.start_datetime.astimezone(pytz.utc)
         self.end_datetime_utc = self.end_datetime.astimezone(pytz.utc)
@@ -33,7 +35,7 @@ class ELBLogAnalyzer:
     def download_logs(self):
         gz_directory = create_directory('./data/log')
         clean_directory(gz_directory)  # Clear existing log files
-        logger.info(f"Downloading logs from S3 bucket from {self.start_datetime_utc} to {self.end_datetime_utc}...")
+        logger.info(f"Searching logs from S3 bucket from {self.start_datetime_utc} to {self.end_datetime_utc}...")
 
         paginator = self.s3_client.get_paginator('list_objects_v2')
         files_to_download = []
@@ -59,7 +61,7 @@ class ELBLogAnalyzer:
                                unit="file", ncols=100,
                                bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}%"):
                 try:
-                    future.result()  # Catch exceptions
+                    future.result()
                 except Exception as e:
                     logger.error(f"Exception during log download: {e}")
 
@@ -79,7 +81,7 @@ class ELBLogAnalyzer:
 
     def decompress_logs(self, gz_directory):
         log_directory = create_directory('./data/parsed')
-        clean_directory(log_directory)  # Clear existing parsed files
+        clean_directory(log_directory)
         logger.info("Decompressing log files...")
 
         gz_files = [f for f in os.listdir(gz_directory) if f.endswith('.gz')]
@@ -109,7 +111,9 @@ class ELBLogAnalyzer:
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             futures = [executor.submit(self._parse_log_file, log_file, log_directory) for log_file in log_files]
-            for future in concurrent.futures.as_completed(futures):
+            for future in tqdm(concurrent.futures.as_completed(futures), total=len(log_files), desc="Parsing",
+                               unit="file", ncols=100,
+                               bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}%"):
                 parsed_logs.extend(future.result())
 
         logger.info(f"Parsed {len(parsed_logs)} log entries.")
@@ -306,25 +310,33 @@ class ELBLogAnalyzer:
     def _create_long_response_times_dataframe(self, long_response_times):
         df = pd.DataFrame(long_response_times)
         df.sort_values(by='total_response_time', ascending=False, inplace=True)
-        df['timestamp'] = df['timestamp'].dt.tz_localize(None)  # Make datetimes timezone-unaware
+        df['timestamp'] = df['timestamp'].dt.tz_localize(None)
         return df.head(100)[['total_response_time', 'timestamp', 'client_ip', 'target_ip', 'request']]
 
     def _create_top_client_ips_dataframe(self, top_client_ips):
-        return pd.DataFrame(top_client_ips, columns=['Client IP', 'Count'])
+        df = pd.DataFrame(top_client_ips, columns=['Client IP', 'Count'])
+        return df[['Count', 'Client IP']]
 
     def _create_top_user_agents_dataframe(self, top_user_agents):
-        return pd.DataFrame(top_user_agents, columns=['User Agent', 'Count'])
+        df = pd.DataFrame(top_user_agents, columns=['User Agent', 'Count'])
+        return df[['Count', 'User Agent']]
 
     def save_to_excel(self, data, prefix, script_start_time):
         timestamp = script_start_time.strftime('%Y%m%d_%H%M%S')
         output_directory = create_directory(f'./data/output/{timestamp}')
         output_path = os.path.join(output_directory, f'{prefix.replace("/", "_")}_report.xlsx')
 
+        max_rows_per_sheet = 1048576
         with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
             workbook = writer.book
             workbook.strings_to_urls = False  # URL 변환 방지
 
             for sheet_name, df in data.items():
+                if df.shape[0] > max_rows_per_sheet:
+                    df = df.iloc[:max_rows_per_sheet]
+                    logger.warning(
+                        f"Data for sheet '{sheet_name}' exceeds {max_rows_per_sheet} rows and has been truncated.")
+
                 df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
 
                 # 자동 열 너비 조정

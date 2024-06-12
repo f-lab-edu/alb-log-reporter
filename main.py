@@ -11,7 +11,6 @@ from botocore.exceptions import NoRegionError, NoCredentialsError, ClientError
 from src.aws_sso_helper import AWSSSOHelper
 from src.alb_log_analyzer import ELBLogAnalyzer
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger()
 
@@ -119,7 +118,6 @@ def main():
 
     aws_session = create_aws_session(args.profile)
 
-    # Get and display accounts for user selection
     accounts = aws_session.get_token_accounts()
     account_ids = sorted(accounts.keys())
     print("Available accounts:")
@@ -130,7 +128,6 @@ def main():
     selected_account_id = account_ids[selected_account_index]
     print(f"Selected account: {accounts[selected_account_id]['accountName']} ({selected_account_id})")
 
-    # Get and display roles for user selection
     roles = accounts[selected_account_id]['roles']
     print("Available roles:")
     for i, role in enumerate(roles):
@@ -140,7 +137,6 @@ def main():
     selected_role_name = roles[selected_role_index]
     print(f"Selected role: {selected_role_name}")
 
-    # Get SSO session with selected account and role
     aws_session = aws_session.get_sso_session(selected_account_id, selected_role_name)
 
     retries = 0
