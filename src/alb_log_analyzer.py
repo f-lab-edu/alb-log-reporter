@@ -11,7 +11,7 @@ import pandas as pd
 import pytz
 from tqdm import tqdm
 
-from src.utils import create_directory, clean_directory
+from src.utils import create_directory, clean_directory, download_abuseipdb
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger()
@@ -25,7 +25,8 @@ class ELBLogAnalyzer:
         self.timezone = pytz.timezone(timezone)
         self.start_datetime = self.timezone.localize(datetime.strptime(start_datetime, '%Y-%m-%d %H:%M'))
         current_time = datetime.now(self.timezone)
-        self.end_datetime = self.timezone.localize(datetime.strptime(end_datetime, '%Y-%m-%d %H:%M')) if end_datetime else current_time
+        self.end_datetime = self.timezone.localize(
+            datetime.strptime(end_datetime, '%Y-%m-%d %H:%M')) if end_datetime else current_time
         if self.end_datetime < self.start_datetime:
             self.end_datetime = current_time
         # UTC 변환
@@ -227,9 +228,12 @@ class ELBLogAnalyzer:
             user_agent_counter[log['user_agent']] += 1
 
         top_client_ips = client_ip_counter.most_common(100)
+        abuse_ip_set = download_abuseipdb()
         top_user_agents = user_agent_counter.most_common(100)
 
         return {
+            'Top 100 Client IP': self._create_top_client_ips_dataframe(top_client_ips, abuse_ip_set),
+            'Top 100 User Agents': self._create_top_user_agents_dataframe(top_user_agents),
             'ELB 2xx Count': self._create_status_code_dataframe(elb_2xx_counts),
             'ELB 3xx Count': self._create_3xx_status_code_dataframe(elb_3xx_counts),
             'ELB 4xx Count': self._create_status_code_dataframe(elb_4xx_counts),
@@ -240,9 +244,7 @@ class ELBLogAnalyzer:
             'ELB 5xx Timestamp': self._create_timestamp_dataframe(elb_5xx_counts),
             'Backend 4xx Timestamp': self._create_timestamp_dataframe(target_4xx_counts),
             'Backend 5xx Timestamp': self._create_timestamp_dataframe(target_5xx_counts),
-            'Top 100 Total time': self._create_long_response_times_dataframe(long_response_times),
-            'Top 100 Client IP': self._create_top_client_ips_dataframe(top_client_ips),
-            'Top 100 User Agents': self._create_top_user_agents_dataframe(top_user_agents)
+            'Top 100 Total time': self._create_long_response_times_dataframe(long_response_times)
         }
 
     def _categorize_log_entry(self, log, elb_2xx_counts, elb_3xx_counts, elb_4xx_counts, elb_5xx_counts,
@@ -304,7 +306,7 @@ class ELBLogAnalyzer:
             [(key[0], key[1], key[3], key[4], key[5]) for key, val in status_code_counts.items()],
             columns=['Timestamp', 'Client IP', 'Request URL', 'ELB Status Code', 'Backend Status Code']
         ).sort_values('Timestamp')
-        df['Timestamp'] = pd.to_datetime(df['Timestamp']).dt.tz_localize(None)  # Make datetimes timezone-unaware
+        df['Timestamp'] = pd.to_datetime(df['Timestamp']).dt.tz_localize(None)  # Timezone 제거(UTC -> Local)
         return df[['Timestamp', 'Client IP', 'Request URL', 'ELB Status Code', 'Backend Status Code']]
 
     def _create_long_response_times_dataframe(self, long_response_times):
@@ -313,9 +315,10 @@ class ELBLogAnalyzer:
         df['timestamp'] = df['timestamp'].dt.tz_localize(None)
         return df.head(100)[['total_response_time', 'timestamp', 'client_ip', 'target_ip', 'request']]
 
-    def _create_top_client_ips_dataframe(self, top_client_ips):
+    def _create_top_client_ips_dataframe(self, top_client_ips, abuse_ip_set):
         df = pd.DataFrame(top_client_ips, columns=['Client IP', 'Count'])
-        return df[['Count', 'Client IP']]
+        df['Abuse'] = df['Client IP'].apply(lambda ip: 'Yes' if ip in abuse_ip_set else 'No')
+        return df[['Count', 'Client IP', 'Abuse']]
 
     def _create_top_user_agents_dataframe(self, top_user_agents):
         df = pd.DataFrame(top_user_agents, columns=['User Agent', 'Count'])
@@ -331,6 +334,8 @@ class ELBLogAnalyzer:
             workbook = writer.book
             workbook.strings_to_urls = False  # URL 변환 방지
 
+            cell_format = workbook.add_format({'text_wrap': True})  # 텍스트 줄 바꿈
+
             for sheet_name, df in data.items():
                 if df.shape[0] > max_rows_per_sheet:
                     df = df.iloc[:max_rows_per_sheet]
@@ -343,7 +348,7 @@ class ELBLogAnalyzer:
                 for column in df:
                     column_length = max(df[column].astype(str).map(len).max(), len(column))
                     col_idx = df.columns.get_loc(column)
-                    writer.sheets[sheet_name].set_column(col_idx, col_idx, column_length)
+                    writer.sheets[sheet_name].set_column(col_idx, col_idx, column_length, cell_format)
 
         logger.info(f"Report saved to {output_path}")
 

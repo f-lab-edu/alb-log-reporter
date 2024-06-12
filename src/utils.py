@@ -2,6 +2,8 @@ import logging
 import os
 import shutil
 
+import requests
+
 logger = logging.getLogger()
 
 
@@ -31,3 +33,10 @@ def clean_directory(directory):
             logger.error(f"Failed to delete directory {abs_path}. Reason: {e}")
     else:
         os.makedirs(abs_path)
+
+
+def download_abuseipdb(
+        url="https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/main/abuseipdb-s100-30d.ipv4"):
+    response = requests.get(url)
+    response.raise_for_status()
+    return set(response.text.splitlines())
