@@ -9,7 +9,7 @@ import pytz
 from botocore.exceptions import NoRegionError, NoCredentialsError, ClientError
 
 from src.aws_sso_helper import AWSSSOHelper
-from src.elb_log_analyzer import ELBLogAnalyzer
+from src.alb_log_analyzer import ELBLogAnalyzer
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

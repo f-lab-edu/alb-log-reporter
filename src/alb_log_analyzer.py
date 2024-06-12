@@ -279,6 +279,8 @@ class ELBLogAnalyzer:
         )
         grouped_df = df.groupby(['Client IP', 'Request', 'ELB Status Code', 'Backend Status Code']).sum().reset_index()
         sorted_df = grouped_df.sort_values('Count', ascending=False)
+        columns = ['Count'] + [col for col in sorted_df.columns if col != 'Count']
+        sorted_df = sorted_df[columns]
         return sorted_df
 
     def _create_3xx_status_code_dataframe(self, status_3xx_code_counts):
@@ -289,6 +291,8 @@ class ELBLogAnalyzer:
         grouped_df = df.groupby(
             ['Client IP', 'Request', 'Redirect URL', 'ELB Status Code', 'Backend Status Code']).sum().reset_index()
         sorted_df = grouped_df.sort_values('Count', ascending=False)
+        columns = ['Count'] + [col for col in sorted_df.columns if col != 'Count']
+        sorted_df = sorted_df[columns]
         return sorted_df
 
     def _create_timestamp_dataframe(self, status_code_counts):
@@ -317,6 +321,9 @@ class ELBLogAnalyzer:
         output_path = os.path.join(output_directory, f'{prefix.replace("/", "_")}_report.xlsx')
 
         with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
+            workbook = writer.book
+            workbook.strings_to_urls = False  # URL 변환 방지
+
             for sheet_name, df in data.items():
                 df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
 
