@@ -1,9 +1,7 @@
-import configparser
 import hashlib
 import json
 import logging
 import os
-import signal
 import webbrowser
 from datetime import datetime, timezone
 from time import sleep
@@ -11,17 +9,21 @@ from time import sleep
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(message)s')
+# 기존 핸들러를 제거하여 중복 로깅 방지
+for handler in logging.root.handlers[:]:
+    logging.root.removeHandler(handler)
+
+# 로깅 설정
 logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
+# 모든 로그 레벨에 대해 간단한 형식의 콘솔 핸들러
+stream_handler = logging.StreamHandler()
+stream_handler.setLevel(logging.INFO)
+stream_handler.setFormatter(logging.Formatter('%(message)s'))
 
-class TimeoutError(Exception):
-    pass
-
-
-def timeout_handler(signum, frame):
-    raise TimeoutError("입력 시간이 초과되었습니다.")
+# 핸들러를 로거에 추가
+logger.addHandler(stream_handler)
 
 
 class TokenCacheManager:
@@ -65,7 +67,7 @@ class TokenCacheManager:
 
 
 class AWSSSOHelper:
-    def __init__(self, start_url: str, session_name: str, client_name: str = 'myapp',
+    def __init__(self, start_url: str, session_name: str, region_name: str, client_name: str = 'myapp',
                  client_type: str = 'public') -> None:
         try:
             logger.info("초기화를 시작합니다...")
@@ -74,49 +76,15 @@ class AWSSSOHelper:
             self.client_name = client_name
             self.client_type = client_type
             self.home_dir = os.path.expanduser("~")
-
-            # ~/.aws/config 파일 읽기
-            config = configparser.ConfigParser()
-            config_path = os.path.join(self.home_dir, ".aws", "config")
-            config.read(config_path)
-
-            if "default" in config and "region" in config["default"]:
-                self.default_region = config.get("default", "region")
-            else:
-                # 타임아웃 시그널 핸들러 등록
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(60)  # 60초 (1분) 타임아웃 설정
-
-                try:
-                    # 사용자로부터 리전 입력받기
-                    self.default_region = input("AWS 리전을 입력하세요 (예: us-east-1): ")
-
-                    # 입력받은 리전이 비어있는 경우 기본값으로 us-east-1 사용
-                    if not self.default_region.strip():
-                        logger.warning("리전이 입력되지 않아 기본값으로 us-east-1을 사용합니다.")
-                        self.default_region = "us-east-1"
-
-                    # ~/.aws/config 파일에 리전 저장
-                    if "default" not in config:
-                        config["default"] = {}
-                    config["default"]["region"] = self.default_region
-                    with open(config_path, 'w') as f:
-                        config.write(f)
-
-                except TimeoutError:
-                    logger.warning("입력 시간이 초과되어 기본값으로 us-east-1을 사용합니다.")
-                    self.default_region = "us-east-1"
-
-                finally:
-                    signal.alarm(0)  # 타임아웃 시그널 해제
-
-            self.session = boto3.Session(region_name=self.default_region)
+            self.region_name = region_name
+            self.session = boto3.Session()  # boto3 세션을 한 번만 초기화
             self.sso_client = None
             self.sso_oidc_client = self.session.client('sso-oidc')
             self.token_cache_manager = TokenCacheManager(start_url, session_name, self.home_dir)
             self.token_cache = self.token_cache_manager.load_token_cache()
 
             if self.token_cache:
+                self.default_region = self.token_cache["region"]
                 self.access_token = self.token_cache["accessToken"]
                 self.sso_client = self.session.client('sso', region_name=self.default_region)
                 if self._is_token_expired(self.token_cache["expiresAt"]):
