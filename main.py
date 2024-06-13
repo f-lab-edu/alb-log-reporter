@@ -61,7 +61,7 @@ def create_aws_session(profile_name):
 def parse_args():
     parser = argparse.ArgumentParser(description="AWS ELB Log Reporter")
     parser.add_argument('-p', '--profile', default='default', help='AWS profile name (default: default)')
-    parser.add_argument('-b', '--s3-uri', required=True,
+    parser.add_argument('-b', '--bucket', required=True,
                         help='S3 URI of the ELB logs, e.g., s3://your-bucket-name/prefix')
     parser.add_argument('-s', '--start', required=True, help='Start datetime in YYYY-MM-DD HH:MM format')
     parser.add_argument('-e', '--end', default=datetime.now(dt_timezone.utc).strftime('%Y-%m-%d %H:%M'),

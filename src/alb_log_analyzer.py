@@ -234,6 +234,7 @@ class ELBLogAnalyzer:
         return {
             'Top 100 Client IP': self._create_top_client_ips_dataframe(top_client_ips, abuse_ip_set),
             'Top 100 User Agents': self._create_top_user_agents_dataframe(top_user_agents),
+            'Top 100 Total time': self._create_long_response_times_dataframe(long_response_times),
             'ELB 2xx Count': self._create_status_code_dataframe(elb_2xx_counts),
             'ELB 3xx Count': self._create_3xx_status_code_dataframe(elb_3xx_counts),
             'ELB 4xx Count': self._create_status_code_dataframe(elb_4xx_counts),
@@ -244,7 +245,6 @@ class ELBLogAnalyzer:
             'ELB 5xx Timestamp': self._create_timestamp_dataframe(elb_5xx_counts),
             'Backend 4xx Timestamp': self._create_timestamp_dataframe(target_4xx_counts),
             'Backend 5xx Timestamp': self._create_timestamp_dataframe(target_5xx_counts),
-            'Top 100 Total time': self._create_long_response_times_dataframe(long_response_times)
         }
 
     def _categorize_log_entry(self, log, elb_2xx_counts, elb_3xx_counts, elb_4xx_counts, elb_5xx_counts,
@@ -325,6 +325,7 @@ class ELBLogAnalyzer:
         return df[['Count', 'User Agent']]
 
     def save_to_excel(self, data, prefix, script_start_time):
+        logger.info("Saving report to Excel...")
         timestamp = script_start_time.strftime('%Y%m%d_%H%M%S')
         output_directory = create_directory(f'./data/output/{timestamp}')
         output_path = os.path.join(output_directory, f'{prefix.replace("/", "_")}_report.xlsx')
