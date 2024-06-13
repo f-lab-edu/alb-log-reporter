@@ -10,6 +10,7 @@ from botocore.exceptions import NoRegionError, NoCredentialsError, ClientError
 
 from src.alb_log_analyzer import ELBLogAnalyzer
 from src.aws_sso_helper import AWSSSOHelper
+from src.utils import get_intro_text
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger()
@@ -59,12 +60,15 @@ def create_aws_session(profile_name):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="AWS ELB Log Reporter")
+    parser = argparse.ArgumentParser(
+        description=get_intro_text(),
+        formatter_class=argparse.RawTextHelpFormatter
+    )
     parser.add_argument('-p', '--profile', default='default', help='AWS profile name (default: default)')
     parser.add_argument('-b', '--bucket', required=True,
-                        help='S3 URI of the ELB logs, e.g., s3://your-bucket-name/prefix')
+                        help='S3 URI of the ELB logs, e.g., s3://{your-bucket-name}/prefix')
     parser.add_argument('-s', '--start', required=True, help='Start datetime in YYYY-MM-DD HH:MM format')
-    parser.add_argument('-e', '--end', default=datetime.now(dt_timezone.utc).strftime('%Y-%m-%d %H:%M'),
+    parser.add_argument('-e', '--end', default=datetime.now(pytz.utc).strftime('%Y-%m-%d %H:%M'),
                         help='End datetime in YYYY-MM-DD HH:MM format (default: now)')
     parser.add_argument('-z', '--timezone', default='UTC', help='Timezone for log timestamps (default: UTC)')
     return parser.parse_args()

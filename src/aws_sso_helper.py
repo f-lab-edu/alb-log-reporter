@@ -9,21 +9,8 @@ from time import sleep
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-# 기존 핸들러를 제거하여 중복 로깅 방지
-for handler in logging.root.handlers[:]:
-    logging.root.removeHandler(handler)
-
-# 로깅 설정
+logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-
-# 모든 로그 레벨에 대해 간단한 형식의 콘솔 핸들러
-stream_handler = logging.StreamHandler()
-stream_handler.setLevel(logging.INFO)
-stream_handler.setFormatter(logging.Formatter('%(message)s'))
-
-# 핸들러를 로거에 추가
-logger.addHandler(stream_handler)
 
 
 class TokenCacheManager:

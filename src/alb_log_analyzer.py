@@ -41,7 +41,9 @@ class ELBLogAnalyzer:
         paginator = self.s3_client.get_paginator('list_objects_v2')
         files_to_download = []
 
-        for page in paginator.paginate(Bucket=self.bucket_name, Prefix=self.prefix):
+        for page in tqdm(paginator.paginate(Bucket=self.bucket_name, Prefix=self.prefix),
+                         desc="Searching logs", unit="page", ncols=100,
+                         bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}%"):
             if 'Contents' not in page:
                 logger.warning(f"No logs found in the specified prefix: s3://{self.bucket_name}/{self.prefix}")
                 continue
@@ -60,7 +62,7 @@ class ELBLogAnalyzer:
                        files_to_download]
             for future in tqdm(concurrent.futures.as_completed(futures), total=total_files, desc="Downloading",
                                unit="file", ncols=100,
-                               bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}%"):
+                               bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed}, remaining: {remaining})"):
                 try:
                     future.result()
                 except Exception as e:
@@ -90,7 +92,8 @@ class ELBLogAnalyzer:
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             list(tqdm(executor.map(self._decompress_log_file, gz_files, [gz_directory] * len(gz_files),
                                    [log_directory] * len(gz_files)), total=len(gz_files), desc="Decompressing",
-                      unit="file", ncols=100, bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}%"))
+                      unit="file", ncols=100,
+                      bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed}, remaining: {remaining})"))
 
         logger.info("Decompression complete.")
         return log_directory
@@ -114,7 +117,7 @@ class ELBLogAnalyzer:
             futures = [executor.submit(self._parse_log_file, log_file, log_directory) for log_file in log_files]
             for future in tqdm(concurrent.futures.as_completed(futures), total=len(log_files), desc="Parsing",
                                unit="file", ncols=100,
-                               bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}%"):
+                               bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed}, remaining: {remaining})"):
                 parsed_logs.extend(future.result())
 
         logger.info(f"Parsed {len(parsed_logs)} log entries.")
@@ -211,6 +214,7 @@ class ELBLogAnalyzer:
         return timestamp.replace(tzinfo=None)
 
     def analyze_logs(self, parsed_logs):
+        logger.info("Analyzing logs...")
         elb_2xx_counts = defaultdict(int)
         elb_3xx_counts = defaultdict(int)
         elb_4xx_counts = defaultdict(int)
@@ -221,7 +225,8 @@ class ELBLogAnalyzer:
         client_ip_counter = Counter()
         user_agent_counter = Counter()
 
-        for log in parsed_logs:
+        for log in tqdm(parsed_logs, desc="Analyzing logs", unit="log", ncols=100,
+                        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed}, remaining: {remaining})"):
             self._categorize_log_entry(log, elb_2xx_counts, elb_3xx_counts, elb_4xx_counts, elb_5xx_counts,
                                        target_4xx_counts, target_5xx_counts, long_response_times)
             client_ip_counter[log['client_ip']] += 1
@@ -313,7 +318,7 @@ class ELBLogAnalyzer:
         df = pd.DataFrame(long_response_times)
         df.sort_values(by='total_response_time', ascending=False, inplace=True)
         df['timestamp'] = df['timestamp'].dt.tz_localize(None)
-        return df.head(100)[['total_response_time', 'timestamp', 'client_ip', 'target_ip', 'request']]
+        return df.head(100)[['Response time(s)', 'Timestamp', 'Client_IP', 'Target_IP', 'Request']]
 
     def _create_top_client_ips_dataframe(self, top_client_ips, abuse_ip_set):
         df = pd.DataFrame(top_client_ips, columns=['Client IP', 'Count'])
@@ -333,11 +338,14 @@ class ELBLogAnalyzer:
         max_rows_per_sheet = 1048576
         with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
             workbook = writer.book
-            workbook.strings_to_urls = False  # URL 변환 방지
+            workbook.strings_to_urls = False
 
-            cell_format = workbook.add_format({'text_wrap': True})  # 텍스트 줄 바꿈
+            cell_format = workbook.add_format({'text_wrap': True, 'valign': 'vcenter'})
+            abuse_format = workbook.add_format(
+                {'bg_color': '#FFC7CE', 'font_color': '#9C0006', 'bold': True})
 
-            for sheet_name, df in data.items():
+            for sheet_name, df in tqdm(data.items(), desc="Saving sheets", unit="sheet", ncols=100,
+                                       bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed}, remaining: {remaining})"):
                 if df.shape[0] > max_rows_per_sheet:
                     df = df.iloc[:max_rows_per_sheet]
                     logger.warning(
@@ -345,11 +353,26 @@ class ELBLogAnalyzer:
 
                 df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
 
-                # 자동 열 너비 조정
+                worksheet = writer.sheets[sheet_name[:31]]
+
                 for column in df:
                     column_length = max(df[column].astype(str).map(len).max(), len(column))
                     col_idx = df.columns.get_loc(column)
-                    writer.sheets[sheet_name].set_column(col_idx, col_idx, column_length, cell_format)
+                    if column == 'Request':
+                        worksheet.set_column(col_idx, col_idx, 95, cell_format)
+                    elif column == 'Redirect URL':
+                        worksheet.set_column(col_idx, col_idx, 50, cell_format)
+                    else:
+                        worksheet.set_column(col_idx, col_idx, column_length, cell_format)
+
+                worksheet.autofilter(0, 0, df.shape[0], df.shape[1] - 1)
+                worksheet.freeze_panes(1, 0)
+
+                if 'Abuse' in df.columns:
+                    abuse_col_idx = df.columns.get_loc('Abuse')
+                    for row in range(1, df.shape[0] + 1):  # Excel 행 번호는 1부터 시작
+                        if df.at[row - 1, 'Abuse'] == 'Yes':
+                            worksheet.write(row, abuse_col_idx, df.at[row - 1, 'Abuse'], abuse_format)
 
         logger.info(f"Report saved to {output_path}")
 
