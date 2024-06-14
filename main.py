@@ -6,6 +6,7 @@ from datetime import datetime, timezone as dt_timezone
 
 import boto3
 import pytz
+from botocore.config import Config  # Import Config
 from botocore.exceptions import NoRegionError, NoCredentialsError, ClientError
 
 from src.alb_log_analyzer import ELBLogAnalyzer
@@ -17,14 +18,12 @@ logger = logging.getLogger()
 
 MAX_RETRIES = 3
 
-
 def is_sso_profile(profile_name):
     config = configparser.ConfigParser()
     config_path = os.path.expanduser("~/.aws/config")
     config.read(config_path)
     session_section = f"sso-session {profile_name}"
     return config.has_section(session_section)
-
 
 def get_sso_profile_info(profile_name):
     config = configparser.ConfigParser()
@@ -36,7 +35,6 @@ def get_sso_profile_info(profile_name):
         sso_region = config.get(session_section, 'sso_region')
         return sso_start_url, sso_region
     raise ValueError(f"SSO profile {profile_name} is missing required fields.")
-
 
 def create_aws_session(profile_name):
     try:
@@ -58,7 +56,6 @@ def create_aws_session(profile_name):
         logger.error(f"An error occurred while creating AWS session: {error}")
         raise
 
-
 def parse_args():
     parser = argparse.ArgumentParser(
         description=get_intro_text(),
@@ -72,7 +69,6 @@ def parse_args():
                         help='End datetime in YYYY-MM-DD HH:MM format (default: now)')
     parser.add_argument('-z', '--timezone', default='UTC', help='Timezone for log timestamps (default: UTC)')
     return parser.parse_args()
-
 
 def process_logs(s3_client, bucket_name, prefix, start_datetime, end_datetime, timezone):
     try:
@@ -103,7 +99,6 @@ def process_logs(s3_client, bucket_name, prefix, start_datetime, end_datetime, t
         except NameError:
             pass
 
-
 def main():
     args = parse_args()
 
@@ -122,7 +117,25 @@ def main():
 
     aws_session = create_aws_session(args.profile)
 
-    accounts = aws_session.get_token_accounts()
+    retries = 0
+    accounts = None
+    while retries < MAX_RETRIES:
+        try:
+            accounts = aws_session.get_token_accounts()
+            break
+        except Exception as e:
+            logger.error(f"Failed to retrieve SSO accounts: {e}")
+            retries += 1
+            if retries < MAX_RETRIES:
+                logger.info("Retrying to retrieve SSO accounts...")
+            else:
+                logger.error("Max retries reached. Exiting...")
+                return
+
+    if not accounts:
+        logger.error("Failed to retrieve SSO accounts after multiple attempts.")
+        return
+
     account_ids = sorted(accounts.keys())
     print("Available accounts:")
     for i, account_id in enumerate(account_ids):
@@ -143,11 +156,14 @@ def main():
 
     aws_session = aws_session.get_sso_session(selected_account_id, selected_role_name)
 
+    # Create S3 client with a connection pool size of 20
+    s3_client = aws_session.client('s3', config=Config(max_pool_connections=20))
+
     retries = 0
     while retries < MAX_RETRIES:
         try:
             bucket_name, prefix = args.bucket.replace("s3://", "").split("/", 1)
-            process_logs(aws_session.client('s3'), bucket_name, prefix, start_datetime, end_datetime, args.timezone)
+            process_logs(s3_client, bucket_name, prefix, start_datetime, end_datetime, args.timezone)
             break
         except ClientError as e:
             if e.response['Error']['Code'] == 'ExpiredToken':
@@ -160,7 +176,6 @@ def main():
         except Exception as e:
             logger.error(f"An error occurred: {e}")
             break
-
 
 if __name__ == '__main__':
     main()

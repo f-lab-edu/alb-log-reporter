@@ -1,3 +1,5 @@
+# aws_sso_helper.py
+
 import hashlib
 import json
 import logging
@@ -11,7 +13,6 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger()
-
 
 class TokenCacheManager:
     def __init__(self, start_url, session_name, home_dir):
@@ -51,7 +52,6 @@ class TokenCacheManager:
             logger.info("토큰 캐시가 성공적으로 저장되었습니다.")
         except Exception as e:
             logger.error(f"토큰 캐시 저장 오류: {e}")
-
 
 class AWSSSOHelper:
     def __init__(self, start_url: str, session_name: str, region_name: str, client_name: str = 'myapp',
@@ -194,6 +194,12 @@ class AWSSSOHelper:
             return accounts
         except (BotoCoreError, ClientError, Exception) as e:
             logger.error(f"SSO 계정 목록 가져오기 오류: {e}")
+            if 'UnauthorizedException' in str(e) or 'InvalidToken' in str(e):
+                logger.info("토큰이 유효하지 않습니다. 토큰을 갱신합니다...")
+                self._refresh_token()
+                return self.get_token_accounts()
+            else:
+                raise
 
     def get_sso_session(self, account_id: str, role_name: str):
         logger.info(f"계정 {account_id}에 대한 역할 {role_name}로 SSO 세션을 생성 중...")
@@ -210,3 +216,9 @@ class AWSSSOHelper:
             return session
         except (BotoCoreError, ClientError, Exception) as e:
             logger.error(f"SSO 세션 생성 오류: {e}")
+            if 'ExpiredToken' in str(e) or 'InvalidToken' in str(e):
+                logger.info("토큰이 유효하지 않습니다. 토큰을 갱신합니다...")
+                self._refresh_token()
+                return self.get_sso_session(account_id, role_name)
+            else:
+                raise

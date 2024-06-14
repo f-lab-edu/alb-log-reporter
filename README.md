@@ -26,11 +26,44 @@ pip install -r requirements.txt
 ```
 
 ## 사용 방법
-AWS ELB 로그 분석 도구를 사용하려면 다음 명령을 실행하세요:
+```text
+python main.py --help
+usage: main.py [-h] [-p PROFILE] -b BUCKET -s START [-e END] [-z TIMEZONE]
 
-```sh
-# 사용 예시
-python main.py -b S3_URI -s "START_DATETIME" -e "END_DATETIME" -z TIMEZONE
+  ____  _      ____       _       ___    ____      ____     ___  ____   ___   ____  ______    ___  ____  
+ /    || |    |    \     | |     /   \  /    |    |    \   /  _]|    \ /   \ |    \|      |  /  _]|    \ 
+|  o  || |    |  o  )    | |    |     ||   __|    |  D  ) /  [_ |  o  )     ||  D  )      | /  [_ |  D  )
+|     || |___ |     |    | |___ |  O  ||  |  |    |    / |    _]|   _/|  O  ||    /|_|  |_||    _]|    / 
+|  _  ||     ||  O  |    |     ||     ||  |_ |    |    \ |   [_ |  |  |     ||    \  |  |  |   [_ |    \ 
+|  |  ||     ||     |    |     ||     ||     |    |  .  \|     ||  |  |     ||  .  \ |  |  |     ||  .  \ 
+|__|__||_____||_____|    |_____| \___/ |___,_|    |__|\_||_____||__|   \___/ |__|\_| |__|  |_____||__|\_|
+
+AWS ALB Log Reporter
+
+This tool automates the analysis of AWS Application Load Balancer (ALB) logs 
+by downloading, decompressing, parsing, and generating a detailed report.
+
+Usage:
+python main.py -p PROFILE_NAME -b S3_URI -s "START_DATETIME" -e "END_DATETIME" -z "TIMEZONE"
+
+Options:
+-p, --profile    AWS profile name (default: default)
+-b, --bucket     S3 URI of the ELB logs, e.g., s3://{your-bucket-name}/prefix
+-s, --start      Start datetime in YYYY-MM-DD HH:MM format
+-e, --end        End datetime in YYYY-MM-DD HH:MM format (default: now)
+-z, --timezone   Timezone for log timestamps (default: UTC)
+
+options:
+  -h, --help            show this help message and exit
+  -p PROFILE, --profile PROFILE
+                        AWS profile name (default: default)
+  -b BUCKET, --bucket BUCKET
+                        S3 URI of the ELB logs, e.g., s3://{your-bucket-name}/prefix
+  -s START, --start START
+                        Start datetime in YYYY-MM-DD HH:MM format
+  -e END, --end END     End datetime in YYYY-MM-DD HH:MM format (default: now)
+  -z TIMEZONE, --timezone TIMEZONE
+                        Timezone for log timestamps (default: UTC)
 ```
 
 ### 명령어 옵션

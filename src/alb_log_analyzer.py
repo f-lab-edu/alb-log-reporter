@@ -36,14 +36,14 @@ class ELBLogAnalyzer:
     def download_logs(self):
         gz_directory = create_directory('./data/log')
         clean_directory(gz_directory)  # Clear existing log files
-        logger.info(f"Searching logs from S3 bucket from {self.start_datetime_utc} to {self.end_datetime_utc}...")
+        # logger.info(f"Searching logs from S3 bucket from {self.start_datetime_utc} to {self.end_datetime_utc}...")
 
         paginator = self.s3_client.get_paginator('list_objects_v2')
         files_to_download = []
 
         for page in tqdm(paginator.paginate(Bucket=self.bucket_name, Prefix=self.prefix),
-                         desc="Searching logs", unit="page", ncols=100,
-                         bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}%"):
+                         desc="Searching log", unit="page", ncols=100,
+                         bar_format="{desc}: {n_fmt} files"):
             if 'Contents' not in page:
                 logger.warning(f"No logs found in the specified prefix: s3://{self.bucket_name}/{self.prefix}")
                 continue
@@ -57,18 +57,18 @@ class ELBLogAnalyzer:
             logger.warning(f"No logs found in the specified time range: {self.start_datetime} to {self.end_datetime}")
             return gz_directory
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
             futures = [executor.submit(self._download_log_file, file_key, gz_directory) for file_key in
                        files_to_download]
-            for future in tqdm(concurrent.futures.as_completed(futures), total=total_files, desc="Downloading",
+            for future in tqdm(concurrent.futures.as_completed(futures), total=total_files, desc="Downloading log files",
                                unit="file", ncols=100,
-                               bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed}, remaining: {remaining})"):
+                               bar_format="(1/5) {desc}: |{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed})"):
                 try:
                     future.result()
                 except Exception as e:
                     logger.error(f"Exception during log download: {e}")
 
-        logger.info("Download complete.")
+        # logger.info("Download complete.")
         return gz_directory
 
     def _download_log_file(self, file_key, gz_directory):
@@ -85,17 +85,17 @@ class ELBLogAnalyzer:
     def decompress_logs(self, gz_directory):
         log_directory = create_directory('./data/parsed')
         clean_directory(log_directory)
-        logger.info("Decompressing log files...")
+        # logger.info("Decompressing log files...")
 
         gz_files = [f for f in os.listdir(gz_directory) if f.endswith('.gz')]
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             list(tqdm(executor.map(self._decompress_log_file, gz_files, [gz_directory] * len(gz_files),
-                                   [log_directory] * len(gz_files)), total=len(gz_files), desc="Decompressing",
+                                   [log_directory] * len(gz_files)), total=len(gz_files), desc="Decompressing .gz files",
                       unit="file", ncols=100,
-                      bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed}, remaining: {remaining})"))
+                      bar_format="(2/5) {desc}: |{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed})"))
 
-        logger.info("Decompression complete.")
+        # logger.info("Decompression complete.")
         return log_directory
 
     def _decompress_log_file(self, gz_file, gz_directory, log_directory):
@@ -109,18 +109,18 @@ class ELBLogAnalyzer:
             logger.error(f"Failed to decompress {gz_file}. Reason: {e}")
 
     def parse_logs(self, log_directory):
-        logger.info("Parsing log files...")
+        # logger.info("Parsing log files...")
         parsed_logs = []
         log_files = [f for f in os.listdir(log_directory) if f.endswith('.log')]
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             futures = [executor.submit(self._parse_log_file, log_file, log_directory) for log_file in log_files]
-            for future in tqdm(concurrent.futures.as_completed(futures), total=len(log_files), desc="Parsing",
+            for future in tqdm(concurrent.futures.as_completed(futures), total=len(log_files), desc="Parsing log files",
                                unit="file", ncols=100,
-                               bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed}, remaining: {remaining})"):
+                               bar_format="(3/5) {desc}: |{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed})"):
                 parsed_logs.extend(future.result())
 
-        logger.info(f"Parsed {len(parsed_logs)} log entries.")
+        logger.info(f"** Total parsed log line: {len(parsed_logs)}")
         return parsed_logs
 
     def _parse_log_file(self, log_file, log_directory):
@@ -159,7 +159,7 @@ class ELBLogAnalyzer:
         if None in [request_processing_time, target_processing_time, response_processing_time]:
             return None
 
-        total_response_time = request_processing_time + target_processing_time + response_processing_time
+        response_time = request_processing_time + target_processing_time + response_processing_time
         timestamp = self._convert_to_timezone(self._parse_timestamp(data['timestamp']))
 
         if data['user_agent'] == '-':
@@ -177,7 +177,7 @@ class ELBLogAnalyzer:
             'received_bytes': data['received_bytes'],
             'sent_bytes': data['sent_bytes'],
             'request': url,  # Only store the URL part
-            'total_response_time': total_response_time,
+            'response_time': response_time,
             'user_agent': data['user_agent'],
             'ssl_cipher': data['ssl_cipher'],
             'ssl_protocol': data['ssl_protocol'],
@@ -214,7 +214,7 @@ class ELBLogAnalyzer:
         return timestamp.replace(tzinfo=None)
 
     def analyze_logs(self, parsed_logs):
-        logger.info("Analyzing logs...")
+        # logger.info("Analyzing logs...")
         elb_2xx_counts = defaultdict(int)
         elb_3xx_counts = defaultdict(int)
         elb_4xx_counts = defaultdict(int)
@@ -226,7 +226,7 @@ class ELBLogAnalyzer:
         user_agent_counter = Counter()
 
         for log in tqdm(parsed_logs, desc="Analyzing logs", unit="log", ncols=100,
-                        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed}, remaining: {remaining})"):
+                        bar_format="(4/5) {desc}: |{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed})"):
             self._categorize_log_entry(log, elb_2xx_counts, elb_3xx_counts, elb_4xx_counts, elb_5xx_counts,
                                        target_4xx_counts, target_5xx_counts, long_response_times)
             client_ip_counter[log['client_ip']] += 1
@@ -239,7 +239,7 @@ class ELBLogAnalyzer:
         return {
             'Top 100 Client IP': self._create_top_client_ips_dataframe(top_client_ips, abuse_ip_set),
             'Top 100 User Agents': self._create_top_user_agents_dataframe(top_user_agents),
-            'Top 100 Total time': self._create_long_response_times_dataframe(long_response_times),
+            'Top 100 Response Time': self._create_long_response_times_dataframe(long_response_times),
             'ELB 2xx Count': self._create_status_code_dataframe(elb_2xx_counts),
             'ELB 3xx Count': self._create_3xx_status_code_dataframe(elb_3xx_counts),
             'ELB 4xx Count': self._create_status_code_dataframe(elb_4xx_counts),
@@ -280,7 +280,7 @@ class ELBLogAnalyzer:
                 log['timestamp'], log['client_ip'], log['target_ip'], log['request'], log['elb_status_code'],
                 log['target_status_code'])] += 1
 
-        if log['total_response_time'] >= 1.0:
+        if log['response_time'] >= 1.0:
             long_response_times.append(log)
 
     def _create_status_code_dataframe(self, status_code_counts):
@@ -309,16 +309,22 @@ class ELBLogAnalyzer:
     def _create_timestamp_dataframe(self, status_code_counts):
         df = pd.DataFrame(
             [(key[0], key[1], key[2], key[3], key[4], key[5]) for key, val in status_code_counts.items()],
-            columns=['Timestamp', 'Client IP', 'Target IP', 'Request URL', 'ELB Status Code', 'Backend Status Code']
+            columns=['Timestamp', 'Client IP', 'Target IP', 'Request', 'ELB Status Code', 'Backend Status Code']
         ).sort_values('Timestamp')
         df['Timestamp'] = pd.to_datetime(df['Timestamp']).dt.tz_localize(None)  # Timezone 제거(UTC -> Local)
-        return df[['Timestamp', 'Client IP', 'Target IP', 'Request URL', 'ELB Status Code', 'Backend Status Code']]
+        return df[['Timestamp', 'Client IP', 'Target IP', 'Request', 'ELB Status Code', 'Backend Status Code']]
 
     def _create_long_response_times_dataframe(self, long_response_times):
-        df = pd.DataFrame(long_response_times)
-        df.sort_values(by='total_response_time', ascending=False, inplace=True)
-        df['timestamp'] = df['timestamp'].dt.tz_localize(None)
-        return df.head(100)[['Response time(s)', 'Timestamp', 'Client_IP', 'Target_IP', 'Request']]
+        df = pd.DataFrame(
+            [(log['response_time'], log['timestamp'], log['client_ip'], log['target_ip'], log['request'],
+              log['elb_status_code'], log['target_status_code'])
+             for log in long_response_times],
+            columns=['Response time', 'Timestamp', 'Client IP', 'Target IP', 'Request', 'ELB Status Code',
+                     'Backend Status Code']
+        )
+        df.sort_values(by='Response time', ascending=False, inplace=True)
+        df['Timestamp'] = pd.to_datetime(df['Timestamp']).dt.tz_localize(None)
+        return df.head(100)
 
     def _create_top_client_ips_dataframe(self, top_client_ips, abuse_ip_set):
         df = pd.DataFrame(top_client_ips, columns=['Client IP', 'Count'])
@@ -330,7 +336,7 @@ class ELBLogAnalyzer:
         return df[['Count', 'User Agent']]
 
     def save_to_excel(self, data, prefix, script_start_time):
-        logger.info("Saving report to Excel...")
+        # logger.info("Saving report to Excel...")
         timestamp = script_start_time.strftime('%Y%m%d_%H%M%S')
         output_directory = create_directory(f'./data/output/{timestamp}')
         output_path = os.path.join(output_directory, f'{prefix.replace("/", "_")}_report.xlsx')
@@ -341,19 +347,30 @@ class ELBLogAnalyzer:
             workbook.strings_to_urls = False
 
             cell_format = workbook.add_format({'text_wrap': True, 'valign': 'vcenter'})
+            header_format = workbook.add_format({'bold': True, 'border': 1, 'text_wrap': True,'align': 'center', 'valign': 'vcenter'})
             abuse_format = workbook.add_format(
                 {'bg_color': '#FFC7CE', 'font_color': '#9C0006', 'bold': True})
 
-            for sheet_name, df in tqdm(data.items(), desc="Saving sheets", unit="sheet", ncols=100,
-                                       bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed}, remaining: {remaining})"):
+            for sheet_name, df in tqdm(data.items(), desc="Creating excel sheets", unit="sheet", ncols=100,
+                                       bar_format="(5/5) {desc}: |{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed})"):
+                worksheet = writer.book.add_worksheet(sheet_name[:31])
+                if df.empty:
+                    worksheet.write(0, 0, "The related data is not displayed because it does not exist.")
+                    continue
+
                 if df.shape[0] > max_rows_per_sheet:
                     df = df.iloc[:max_rows_per_sheet]
                     logger.warning(
                         f"Data for sheet '{sheet_name}' exceeds {max_rows_per_sheet} rows and has been truncated.")
 
-                df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+                # Write the dataframe without headers
+                df.to_excel(writer, sheet_name=sheet_name[:31], index=False, header=False, startrow=1)
 
                 worksheet = writer.sheets[sheet_name[:31]]
+
+                # Write the header manually with formatting
+                for col_num, value in enumerate(df.columns.values):
+                    worksheet.write(0, col_num, value, header_format)
 
                 for column in df:
                     column_length = max(df[column].astype(str).map(len).max(), len(column))
@@ -373,8 +390,8 @@ class ELBLogAnalyzer:
                     for row in range(1, df.shape[0] + 1):  # Excel 행 번호는 1부터 시작
                         if df.at[row - 1, 'Abuse'] == 'Yes':
                             worksheet.write(row, abuse_col_idx, df.at[row - 1, 'Abuse'], abuse_format)
-
-        logger.info(f"Report saved to {output_path}")
+        logger.info("** Report saved successfully.")
+        logger.info(f"** Report File Path: {output_path}")
 
     def clean_up(self, directories):
         for directory in directories:

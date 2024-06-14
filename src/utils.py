@@ -10,15 +10,14 @@ logger = logging.getLogger()
 def get_intro_text():
     intro_text = """
   ____  _      ____       _       ___    ____      ____     ___  ____   ___   ____  ______    ___  ____  
- /    || |    |    \     | |     /   \  /    |    |    \   /  _]|    \ /   \ |    \|      |  /  _]|    \ 
+ /    || |    |    \\     | |     /   \\  /    |    |    \\   /  _]|    \\ /   \\ |    \\|      |  /  _]|    \\ 
 |  o  || |    |  o  )    | |    |     ||   __|    |  D  ) /  [_ |  o  )     ||  D  )      | /  [_ |  D  )
 |     || |___ |     |    | |___ |  O  ||  |  |    |    / |    _]|   _/|  O  ||    /|_|  |_||    _]|    / 
-|  _  ||     ||  O  |    |     ||     ||  |_ |    |    \ |   [_ |  |  |     ||    \  |  |  |   [_ |    \ 
-|  |  ||     ||     |    |     ||     ||     |    |  .  \|     ||  |  |     ||  .  \ |  |  |     ||  .  \ 
-|__|__||_____||_____|    |_____| \___/ |___,_|    |__|\_||_____||__|   \___/ |__|\_| |__|  |_____||__|\_|
+|  _  ||     ||  O  |    |     ||     ||  |_ |    |    \\ |   [_ |  |  |     ||    \\  |  |  |   [_ |    \\ 
+|  |  ||     ||     |    |     ||     ||     |    |  .  \\|     ||  |  |     ||  .  \\ |  |  |     ||  .  \\ 
+|__|__||_____||_____|    |_____| \\___/ |___,_|    |__|\\_||_____||__|   \\___/ |__|\\_| |__|  |_____||__|\\_|
 
 AWS ELB Log Reporter
-Version: 1.0.0
 
 This tool automates the analysis of AWS Application Load Balancer (ALB) logs 
 by downloading, decompressing, parsing, and generating a detailed report.
@@ -31,8 +30,7 @@ Options:
 -b, --bucket     S3 URI of the ELB logs, e.g., s3://{your-bucket-name}/prefix
 -s, --start      Start datetime in YYYY-MM-DD HH:MM format
 -e, --end        End datetime in YYYY-MM-DD HH:MM format (default: now)
--z, --timezone   Timezone for log timestamps (default: UTC)
-"""
+-z, --timezone   Timezone for log timestamps (default: UTC)"""
     return intro_text
 
 
