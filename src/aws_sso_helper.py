@@ -1,5 +1,3 @@
-# aws_sso_helper.py
-
 import hashlib
 import json
 import logging
@@ -26,45 +24,45 @@ class TokenCacheManager:
 
     def load_token_cache(self):
         try:
-            logger.info("토큰 캐시를 로드 중...")
+            logger.info("🔄 Loading token cache...")
             cache_key = self.generate_cache_key()
             cache_path = os.path.join(self.home_dir, ".aws", "sso", "cache", f"{cache_key}.json")
 
             if os.path.exists(cache_path):
                 with open(cache_path, 'r') as file:
                     cache = json.loads(file.read())
-                    logger.info("토큰 캐시가 성공적으로 로드되었습니다.")
+                    logger.info("✅ Token cache loaded successfully.")
                     return cache
-            logger.error("토큰 캐시 파일을 찾을 수 없습니다. 새로 고침이 필요합니다.")
+            logger.error(f"❌ Token cache not found in {cache_path}.")
             return None
         except Exception as e:
-            logger.error(f"토큰 캐시 로드 오류: {e}")
+            logger.error(f"⚠️ Failed to load token cache: {e}")
 
     def save_token_cache(self, token_cache):
         try:
             cache_key = self.generate_cache_key()
             cache_dir = os.path.join(self.home_dir, ".aws", "sso", "cache")
-            os.makedirs(cache_dir, exist_ok=True)  # 디렉토리 존재 여부 확인
+            os.makedirs(cache_dir, exist_ok=True)
             cache_path = os.path.join(cache_dir, f"{cache_key}.json")
 
             with open(cache_path, 'w') as file:
                 file.write(json.dumps(token_cache))
-            logger.info("토큰 캐시가 성공적으로 저장되었습니다.")
+            logger.info("✅ Token cache saved successfully.")
         except Exception as e:
-            logger.error(f"토큰 캐시 저장 오류: {e}")
+            logger.error(f"⚠️ Failed to save token cache: {e}")
 
 class AWSSSOHelper:
     def __init__(self, start_url: str, session_name: str, region_name: str, client_name: str = 'myapp',
                  client_type: str = 'public') -> None:
         try:
-            logger.info("초기화를 시작합니다...")
+            logger.info("🚀 Initializing AWS SSO Helper...")
             self.start_url = start_url
             self.session_name = session_name
             self.client_name = client_name
             self.client_type = client_type
             self.home_dir = os.path.expanduser("~")
             self.region_name = region_name
-            self.session = boto3.Session()  # boto3 세션을 한 번만 초기화
+            self.session = boto3.Session()
             self.sso_client = None
             self.sso_oidc_client = self.session.client('sso-oidc')
             self.token_cache_manager = TokenCacheManager(start_url, session_name, self.home_dir)
@@ -79,20 +77,20 @@ class AWSSSOHelper:
             else:
                 self._start_device_authorization_flow()
 
-            logger.info("초기화가 성공적으로 완료되었습니다.")
+            logger.info("✅ AWS SSO Helper initialized successfully.")
         except Exception as e:
-            logger.error(f"초기화 오류: {e}")
+            logger.error(f"❌ Failed to initialize AWS SSO Helper: {e}")
 
     def _is_token_expired(self, expires_at):
         try:
             return datetime.strptime(expires_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) < datetime.now(
                 timezone.utc)
         except Exception as e:
-            logger.error(f"토큰 만료 확인 오류: {e}")
+            logger.error(f"❌ Failed to check token expiry: {e}")
 
     def _start_device_authorization_flow(self):
         try:
-            logger.info("디바이스 인증 프로세스를 시작합니다...")
+            logger.info("🔑 Starting device authorization flow...")
 
             client_creds = self.sso_oidc_client.register_client(
                 clientName=self.client_name,
@@ -109,7 +107,7 @@ class AWSSSOHelper:
             self._prompt_user_to_authorize(device_auth['verificationUriComplete'], device_auth['deviceCode'],
                                            device_auth['expiresIn'], device_auth['interval'], client_creds)
         except (BotoCoreError, ClientError) as e:
-            logger.error(f"디바이스 인증 오류: {e}")
+            logger.error(f"❌ Failed to start device authorization")
 
     def _prompt_user_to_authorize(self, verification_url, device_code, expires_in, interval, client_creds):
         webbrowser.open(verification_url, autoraise=True)
@@ -127,7 +125,7 @@ class AWSSSOHelper:
                 return
             except self.sso_oidc_client.exceptions.AuthorizationPendingException:
                 continue
-        raise Exception("인증 실패 또는 만료되었습니다.")
+        raise Exception("❌ Device authorization timeout")
 
     def _update_token_cache(self, token, client_creds):
         expires_at = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() + token["expiresIn"]).strftime(
@@ -145,12 +143,12 @@ class AWSSSOHelper:
         self.default_region = self.token_cache["region"]
         self.access_token = self.token_cache["accessToken"]
         self.sso_client = self.session.client('sso', region_name=self.default_region)
-        logger.info("디바이스 인증이 성공적으로 완료되었습니다.")
+        logger.info("✅ Token cache updated successfully.")
 
     def _refresh_token(self):
-        logger.info("토큰을 갱신 중...")
+        logger.info("🔄 Refreshing token...")
         if not self.token_cache.get('refreshToken'):
-            logger.error("갱신 토큰이 없습니다. 디바이스 인증 프로세스를 다시 시작합니다.")
+            logger.error("❌ Refresh token not found. Starting device authorization flow...")
             self._start_device_authorization_flow()
             return
 
@@ -162,13 +160,13 @@ class AWSSSOHelper:
                 refreshToken=self.token_cache['refreshToken']
             )
             self._update_token_cache(response, self.token_cache)
-            logger.info("토큰이 성공적으로 갱신되었습니다.")
+            logger.info("✅ Token refreshed successfully.")
         except (self.sso_oidc_client.exceptions.InvalidGrantException, Exception) as e:
-            logger.error(f"토큰 갱신 오류: {e}")
+            logger.error(f"❌ Failed to refresh token: {e}")
             self._start_device_authorization_flow()
 
     def get_token_accounts(self):
-        logger.info("SSO 계정 목록을 가져오는 중...")
+        logger.info("🔍 Getting AWS SSO accounts...")
         if not self.sso_client:
             self.sso_client = self.session.client('sso', region_name=self.default_region)
 
@@ -190,19 +188,19 @@ class AWSSSOHelper:
                         accessToken=self.access_token, accountId=account['accountId'])['roleList']
                     for role in roles:
                         accounts[account['accountId']]['roles'].append(role['roleName'])
-            logger.info("SSO 계정 목록을 성공적으로 가져왔습니다.")
+            logger.info("✅ SSO accounts retrieved successfully.")
             return accounts
         except (BotoCoreError, ClientError, Exception) as e:
-            logger.error(f"SSO 계정 목록 가져오기 오류: {e}")
+            logger.error(f"❌ Failed to retrieve SSO accounts: {e}")
             if 'UnauthorizedException' in str(e) or 'InvalidToken' in str(e):
-                logger.info("토큰이 유효하지 않습니다. 토큰을 갱신합니다...")
+                logger.info("🔄 Token is invalid. Refreshing token...")
                 self._refresh_token()
                 return self.get_token_accounts()
             else:
                 raise
 
     def get_sso_session(self, account_id: str, role_name: str):
-        logger.info(f"계정 {account_id}에 대한 역할 {role_name}로 SSO 세션을 생성 중...")
+        logger.info(f"🔑 Creating SSO session for <{account_id}> and <{role_name}>...")
         try:
             credentials = self.sso_client.get_role_credentials(
                 roleName=role_name, accountId=account_id, accessToken=self.access_token)['roleCredentials']
@@ -212,12 +210,12 @@ class AWSSSOHelper:
                 aws_secret_access_key=credentials['secretAccessKey'],
                 aws_session_token=credentials['sessionToken']
             )
-            logger.info(f"계정 {account_id}에 대한 SSO 세션이 성공적으로 생성되었습니다.")
+            logger.info(f"✅ SSO session created successfully.")
             return session
         except (BotoCoreError, ClientError, Exception) as e:
-            logger.error(f"SSO 세션 생성 오류: {e}")
+            logger.error(f"❌ Failed to create SSO session: {e}")
             if 'ExpiredToken' in str(e) or 'InvalidToken' in str(e):
-                logger.info("토큰이 유효하지 않습니다. 토큰을 갱신합니다...")
+                logger.info("🔄 Token is invalid. Refreshing token...")
                 self._refresh_token()
                 return self.get_sso_session(account_id, role_name)
             else:
