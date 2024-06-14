@@ -146,7 +146,7 @@ def main():
     retries = 0
     while retries < MAX_RETRIES:
         try:
-            bucket_name, prefix = args.s3_uri.replace("s3://", "").split("/", 1)
+            bucket_name, prefix = args.bucket.replace("s3://", "").split("/", 1)
             process_logs(aws_session.client('s3'), bucket_name, prefix, start_datetime, end_datetime, args.timezone)
             break
         except ClientError as e:

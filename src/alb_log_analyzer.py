@@ -308,11 +308,11 @@ class ELBLogAnalyzer:
 
     def _create_timestamp_dataframe(self, status_code_counts):
         df = pd.DataFrame(
-            [(key[0], key[1], key[3], key[4], key[5]) for key, val in status_code_counts.items()],
-            columns=['Timestamp', 'Client IP', 'Request URL', 'ELB Status Code', 'Backend Status Code']
+            [(key[0], key[1], key[2], key[3], key[4], key[5]) for key, val in status_code_counts.items()],
+            columns=['Timestamp', 'Client IP', 'Target IP', 'Request URL', 'ELB Status Code', 'Backend Status Code']
         ).sort_values('Timestamp')
         df['Timestamp'] = pd.to_datetime(df['Timestamp']).dt.tz_localize(None)  # Timezone 제거(UTC -> Local)
-        return df[['Timestamp', 'Client IP', 'Request URL', 'ELB Status Code', 'Backend Status Code']]
+        return df[['Timestamp', 'Client IP', 'Target IP', 'Request URL', 'ELB Status Code', 'Backend Status Code']]
 
     def _create_long_response_times_dataframe(self, long_response_times):
         df = pd.DataFrame(long_response_times)
