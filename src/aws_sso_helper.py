@@ -12,6 +12,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger()
 
+
 class TokenCacheManager:
     def __init__(self, start_url, session_name, home_dir):
         self.start_url = start_url
@@ -50,6 +51,7 @@ class TokenCacheManager:
             logger.info("✅ Token cache saved successfully.")
         except Exception as e:
             logger.error(f"⚠️ Failed to save token cache: {e}")
+
 
 class AWSSSOHelper:
     def __init__(self, start_url: str, session_name: str, region_name: str, client_name: str = 'myapp',
@@ -110,6 +112,8 @@ class AWSSSOHelper:
             logger.error(f"❌ Failed to start device authorization")
 
     def _prompt_user_to_authorize(self, verification_url, device_code, expires_in, interval, client_creds):
+        logger.info("🔗 Opening device verification URL in browser...")
+        logger.info(f"   {verification_url}")
         webbrowser.open(verification_url, autoraise=True)
 
         for _ in range(0, expires_in // interval):
@@ -122,9 +126,16 @@ class AWSSSOHelper:
                     clientSecret=client_creds['clientSecret'],
                 )
                 self._update_token_cache(token, client_creds)
+                logger.info("✅ Device authorized successfully.")
                 return
             except self.sso_oidc_client.exceptions.AuthorizationPendingException:
                 continue
+            except self.sso_oidc_client.exceptions.SlowDownException:
+                logger.error("❌ Slow down. Rate limit exceeded.")
+                return
+            except self.sso_oidc_client.exceptions.ExpiredTokenException:
+                logger.error("❌ Device authorization expired.")
+                return
         raise Exception("❌ Device authorization timeout")
 
     def _update_token_cache(self, token, client_creds):
@@ -166,7 +177,7 @@ class AWSSSOHelper:
             self._start_device_authorization_flow()
 
     def get_token_accounts(self):
-        logger.info("🔍 Getting AWS SSO accounts...")
+        logger.info("🔍 Retrieving all SSO accounts...")
         if not self.sso_client:
             self.sso_client = self.session.client('sso', region_name=self.default_region)
 
@@ -200,7 +211,7 @@ class AWSSSOHelper:
                 raise
 
     def get_sso_session(self, account_id: str, role_name: str):
-        logger.info(f"🔑 Creating AWS SSO session...")
+        logger.info(f"🔑 Creating SSO session for account {account_id} and role {role_name}...")
         try:
             credentials = self.sso_client.get_role_credentials(
                 roleName=role_name, accountId=account_id, accessToken=self.access_token)['roleCredentials']

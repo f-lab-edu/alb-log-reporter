@@ -16,6 +16,9 @@ def get_intro_text():
 |  _  ||     ||  O  |    |     ||     ||  |_ |    |    \\ |   [_ |  |  |     ||    \\  |  |  |   [_ |    \\ 
 |  |  ||     ||     |    |     ||     ||     |    |  .  \\|     ||  |  |     ||  .  \\ |  |  |     ||  .  \\ 
 |__|__||_____||_____|    |_____| \\___/ |___,_|    |__|\\_||_____||__|   \\___/ |__|\\_| |__|  |_____||__|\\_|
+
+Author: @eunch
+email: manatee569@anglernook.com
 """
     return intro_text
 
@@ -54,7 +57,7 @@ def clean_directory(directory):
 
 def download_abuseipdb(
         url="https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/main/abuseipdb-s100-30d.ipv4"):
-    logger.info("🌐 Starting update from AbuseIPDB...")
+    logger.info("🌐 Starting update from AbuseIP data list.")
     try:
         response = requests.get(url)
         response.raise_for_status()

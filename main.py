@@ -19,12 +19,14 @@ logger = logging.getLogger()
 
 MAX_RETRIES = 3  # Maximum number of retries for token refresh
 
+
 def is_sso_profile(profile_name):
     config = configparser.ConfigParser()
     config_path = os.path.expanduser("~/.aws/config")
     config.read(config_path)
     profile_section = f"profile {profile_name}"
     return config.has_section(profile_section) and 'sso_start_url' in config[profile_section]
+
 
 def is_sso_session_profile(profile_name):
     config = configparser.ConfigParser()
@@ -33,29 +35,33 @@ def is_sso_session_profile(profile_name):
     session_section = f"sso-session {profile_name}"
     return config.has_section(session_section)
 
+
 def get_sso_profile_info(profile_name):
     config = configparser.ConfigParser()
     config_path = os.path.expanduser("~/.aws/config")
     config.read(config_path)
     profile_section = f"profile {profile_name}"
-    if 'sso_start_url' in config[profile_section]:
-        sso_start_url = config[profile_section]['sso_start_url']
-        sso_region = config[profile_section]['sso_region']
-        sso_account_id = config[profile_section]['sso_account_id']
-        sso_role_name = config[profile_section]['sso_role_name']
-        return sso_start_url, sso_region, sso_account_id, sso_role_name
+    if config.has_section(profile_section):
+        sso_start_url = config.get(profile_section, 'sso_start_url')
+        sso_region = config.get(profile_section, 'sso_region')
+        sso_account_id = config.get(profile_section, 'sso_account_id', fallback=None)
+        sso_role_name = config.get(profile_section, 'sso_role_name', fallback=None)
+        sso_session = config.get(profile_section, 'sso_session')
+        return sso_start_url, sso_region, sso_account_id, sso_role_name, sso_session
     raise ValueError(f"❌ SSO profile {profile_name} is missing required fields.")
+
 
 def get_sso_session_profile_info(profile_name):
     config = configparser.ConfigParser()
     config_path = os.path.expanduser("~/.aws/config")
     config.read(config_path)
     session_section = f"sso-session {profile_name}"
-    if 'sso_start_url' in config[session_section]:
-        sso_start_url = config[session_section]['sso_start_url']
-        sso_region = config[session_section]['sso_region']
+    if config.has_section(session_section):
+        sso_start_url = config.get(session_section, 'sso_start_url')
+        sso_region = config.get(session_section, 'sso_region')
         return sso_start_url, sso_region
     raise ValueError(f"❌ SSO session profile {profile_name} is missing required fields.")
+
 
 def is_access_key_profile(profile_name):
     credentials_config = configparser.ConfigParser()
@@ -63,32 +69,42 @@ def is_access_key_profile(profile_name):
     credentials_config.read(credentials_path)
     return profile_name in credentials_config
 
+
 def create_aws_session(profile_name, profile_type):
     try:
         if profile_type == 'profile':
             if is_sso_profile(profile_name):
                 logger.info(f"✔️ Using AWS SSO profile: {profile_name}")
-                sso_start_url, sso_region, sso_account_id, sso_role_name = get_sso_profile_info(profile_name)
-                sso_helper = AWSSSOHelper(start_url=sso_start_url, session_name=profile_name, region_name=sso_region)
+                sso_start_url, sso_region, sso_account_id, sso_role_name, sso_session = get_sso_profile_info(
+                    profile_name)
+                sso_helper = AWSSSOHelper(start_url=sso_start_url, session_name=sso_session, region_name=sso_region)
+                if not sso_helper.token_cache:
+                    logger.info(
+                        f"🔒 Profile {profile_name} is not device authenticated. ⏳ Starting device authorization flow...")
+                    sso_helper._start_device_authorization_flow()
                 return sso_helper, sso_account_id, sso_role_name
             else:
-                raise ValueError(f"Profile {profile_name} not found or not configured correctly for SSO.")
+                raise ValueError(f"❌ Profile {profile_name} not found or not configured correctly for SSO.")
         elif profile_type == 'sso-session':
             if is_sso_session_profile(profile_name):
                 logger.info(f"✔️ Using AWS SSO session profile: {profile_name}")
                 sso_start_url, sso_region = get_sso_session_profile_info(profile_name)
                 sso_helper = AWSSSOHelper(start_url=sso_start_url, session_name=profile_name, region_name=sso_region)
+                if not sso_helper.token_cache:
+                    logger.info(
+                        f"🔒 Profile {profile_name} is not device authenticated. ⏳ Starting device authorization flow...")
+                    sso_helper._start_device_authorization_flow()
                 return sso_helper, None, None
             else:
-                raise ValueError(f"SSO session profile {profile_name} not found or not configured correctly.")
+                raise ValueError(f"❌ SSO session profile {profile_name} not found or not configured correctly.")
         elif profile_type == 'access_key':
             if is_access_key_profile(profile_name):
                 logger.info(f"✔️ Using AWS access key profile: {profile_name}")
                 return boto3.Session(profile_name=profile_name), None, None
             else:
-                raise ValueError(f"Profile {profile_name} not found in credentials file.")
+                raise ValueError(f"❌ Profile {profile_name} not found in credentials file.")
         else:
-            raise ValueError(f"Invalid profile type: {profile_type}")
+            raise ValueError(f"❌ Invalid profile type: {profile_type}")
     except NoCredentialsError:
         logger.error(f"❌ No credentials found for profile: {profile_name}")
         raise
@@ -99,24 +115,23 @@ def create_aws_session(profile_name, profile_type):
         logger.error(f"❌ An error occurred while creating AWS session: {error}")
         raise
 
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description=get_intro_text(),
         formatter_class=argparse.RawTextHelpFormatter
     )
-    parser.add_argument('-p', '--profile', required=True,
-                        help='AWS profile name to use for authentication.')
-    parser.add_argument('-t', '--profile-type', choices=['profile', 'sso-session', 'access_key'], required=True,
+    parser.add_argument('-p', '--profile', default='default', help='AWS profile name (default: default)')
+    parser.add_argument('-t', '--profile-type', choices=['access_key', 'profile', 'sso-session'], required=True,
                         help='The type of AWS profile to use: "profile" for SSO profiles, "sso-session" for SSO session profiles, or "access_key" for access key profiles.')
     parser.add_argument('-b', '--bucket', required=True,
-                        help='The S3 URI where the ELB logs are stored. It should be in the format: s3://{your-bucket-name}/AWSLogs/{account_id}/elasticloadbalancing/{region}/')
-    parser.add_argument('-s', '--start', required=True,
-                        help='The start date and time for the logs to analyze. It should be in the format: YYYY-MM-DD HH:MM')
+                        help='S3 URI of the ELB logs, e.g., s3://{your-bucket-name}/AWSLogs/{account_id}/elasticloadbalancing/{region}/')
+    parser.add_argument('-s', '--start', required=True, help='Start datetime in YYYY-MM-DD HH:MM format')
     parser.add_argument('-e', '--end', default=datetime.now(pytz.utc).strftime('%Y-%m-%d %H:%M'),
-                        help='The end date and time for the logs to analyze. It should be in the format: YYYY-MM-DD HH:MM. If not provided, the current date and time will be used.')
-    parser.add_argument('-z', '--timezone', default='UTC',
-                        help='The timezone to use for log timestamps. If not provided, UTC will be used.')
+                        help='End datetime in YYYY-MM-DD HH:MM format (default: now)')
+    parser.add_argument('-z', '--timezone', default='UTC', help='Timezone for log timestamps (default: UTC)')
     return parser.parse_args()
+
 
 def process_logs(s3_client, bucket_name, prefix, start_datetime, end_datetime, timezone):
     try:
@@ -147,6 +162,7 @@ def process_logs(s3_client, bucket_name, prefix, start_datetime, end_datetime, t
         except NameError:
             pass
 
+
 def main():
     args = parse_args()
 
@@ -165,12 +181,9 @@ def main():
 
     aws_session, sso_account_id, sso_role_name = create_aws_session(args.profile, args.profile_type)
 
-    if args.profile_type == 'profile':
-        if sso_account_id and sso_role_name:
-            aws_session = aws_session.get_sso_session(sso_account_id, sso_role_name)
-        else:
+    if args.profile_type == 'profile' or args.profile_type == 'sso-session':
+        if not sso_account_id or not sso_role_name:
             retries = 0
-            accounts = None
             while retries < MAX_RETRIES:
                 try:
                     accounts = aws_session.get_token_accounts()
@@ -188,26 +201,23 @@ def main():
                 logger.error("❌ Failed to retrieve SSO accounts after multiple attempts.")
                 return
 
-            # 계정 이름으로 정렬
             sorted_accounts = sorted(accounts.items(), key=lambda item: item[1]['accountName'])
 
-            # 계정 목록을 PrettyTable로 출력
             account_table = PrettyTable()
-            account_table.field_names = ["#", "Account Name", "Account ID"]
+            account_table.field_names = ["📍", "💼 Account Name", "🆔 Account ID"]
             for i, (account_id, account_info) in enumerate(sorted_accounts):
                 account_table.add_row([i + 1, account_info['accountName'], account_id])
             print(account_table)
 
             selected_account_index = int(input("\n➡️ Select an account by number: ")) - 1
             selected_account_id = sorted_accounts[selected_account_index][0]
-            print(f"\n✔️ Selected account: {sorted_accounts[selected_account_index][1]['accountName']} ({selected_account_id})\n")
+            print(
+                f"\n✔️ Selected account: {sorted_accounts[selected_account_index][1]['accountName']} ({selected_account_id})\n")
 
-            # 역할 이름으로 정렬
             roles = sorted(sorted_accounts[selected_account_index][1]['roles'])
 
-            # 역할 목록을 PrettyTable로 출력
             role_table = PrettyTable()
-            role_table.field_names = ["#", "Role Name"]
+            role_table.field_names = ["📍", "⭐ Role Name"]
             for i, role in enumerate(roles):
                 role_table.add_row([i + 1, role])
             print(role_table)
@@ -216,9 +226,13 @@ def main():
             selected_role_name = roles[selected_role_index]
             print(f"\n✔️ Selected role: {selected_role_name}\n")
 
-            aws_session = aws_session.get_sso_session(selected_account_id, selected_role_name)
+            boto3_session = aws_session.get_sso_session(selected_account_id, selected_role_name)
+        else:
+            boto3_session = aws_session.get_sso_session(sso_account_id, sso_role_name)
+    else:
+        boto3_session = aws_session
 
-    s3_client = aws_session.client('s3', config=Config(max_pool_connections=20))
+    s3_client = boto3_session.client('s3', config=Config(max_pool_connections=50))
 
     retries = 0
     while retries < MAX_RETRIES:
@@ -237,6 +251,7 @@ def main():
         except Exception as e:
             logger.error(f"❌ An error occurred: {e}")
             break
+
 
 if __name__ == '__main__':
     main()

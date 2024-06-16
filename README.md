@@ -97,6 +97,13 @@ aws configure sso 명령을 사용하여 설정할 수도 있습니다.
 sso_start_url = https://example1.awsapps.com/start/#/
 sso_region = ap-northeast-2
 sso_registration_scopes = sso:account:access
+
+[profile readonly-sso-role-117630110551]
+sso_start_url = https://example1.awsapps.com/start/#/
+sso_session = eunch
+sso_account_id = 117630110551
+sso_role_name = readonly-sso-role
+sso_region = ap-northeast-2
 ```
 
 ### Standard AWS Credentials Profile 설정 예제
