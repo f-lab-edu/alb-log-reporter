@@ -1,5 +1,4 @@
-```markdown
-# AWS ELB Log Reporter
+# AWS ALB Log Reporter
 
 이 도구는 CLI 형태로 제공되며, AWS Application Load Balancer(ALB) 로그를 S3 버킷에서 다운로드하고, 압축을 해제하고, 파싱하여 분석한 후, 분석 결과를 Excel 파일로 저장합니다.
 
