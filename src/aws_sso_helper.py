@@ -200,7 +200,7 @@ class AWSSSOHelper:
                 raise
 
     def get_sso_session(self, account_id: str, role_name: str):
-        logger.info(f"🔑 Creating SSO session for <{account_id}> and <{role_name}>...")
+        logger.info(f"🔑 Creating AWS SSO session...")
         try:
             credentials = self.sso_client.get_role_credentials(
                 roleName=role_name, accountId=account_id, accessToken=self.access_token)['roleCredentials']

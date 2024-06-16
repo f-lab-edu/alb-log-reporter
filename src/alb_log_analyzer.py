@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 from collections import defaultdict, Counter
 from datetime import datetime
 
@@ -39,9 +40,9 @@ class ELBLogAnalyzer:
         paginator = self.s3_client.get_paginator('list_objects_v2')
         files_to_download = []
 
-        logger.info(f"⏰ Period({self.timezone}): {self.start_datetime} ~ {self.end_datetime} (UTC: {self.start_datetime_utc} ~ {self.end_datetime_utc})")
+        logger.info(f"⏰ Period({self.timezone}): {self.start_datetime} ~ {self.end_datetime}")
         for page in tqdm(paginator.paginate(Bucket=self.bucket_name, Prefix=self.prefix),
-                         desc="🔍 Searching log", unit="page", ncols=100,
+                         desc="🔍 Scanning ALB log list", unit="page", ncols=100,
                          bar_format="(1/6) {desc}: {n_fmt} files"):
             if 'Contents' not in page:
                 logger.warning(f"⚠️ No logs found in the specified prefix: s3://{self.bucket_name}/{self.prefix}")
@@ -53,13 +54,15 @@ class ELBLogAnalyzer:
 
         total_files = len(files_to_download)
         if total_files == 0:
-            logger.warning(f"⚠️ No logs found in the specified time range: {self.start_datetime} to {self.end_datetime}")
+            logger.warning(
+                f"⚠️ No logs found in the specified time range: {self.start_datetime} to {self.end_datetime}")
             return gz_directory
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
             futures = [executor.submit(self._download_log_file, file_key, gz_directory) for file_key in
                        files_to_download]
-            for future in tqdm(concurrent.futures.as_completed(futures), total=total_files, desc="⬇️ Downloading log files",
+            for future in tqdm(concurrent.futures.as_completed(futures), total=total_files,
+                               desc="⬇️ Downloading log files",
                                unit="file", ncols=100,
                                bar_format="(2/6) {desc}: |{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed})"):
                 try:
@@ -76,7 +79,8 @@ class ELBLogAnalyzer:
         except self.s3_client.exceptions.ClientError as e:
             error_code = e.response['Error']['Code']
             if error_code == '403':
-                logger.error(f"❌ Download failed for s3://{self.bucket_name}/{file_key}. Check permissions. Reason: {e}")
+                logger.error(
+                    f"❌ Download failed for s3://{self.bucket_name}/{file_key}. Check permissions. Reason: {e}")
             else:
                 logger.error(f"❌ Download failed for s3://{self.bucket_name}/{file_key}. Reason: {e}")
 
@@ -88,7 +92,8 @@ class ELBLogAnalyzer:
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             list(tqdm(executor.map(self._decompress_log_file, gz_files, [gz_directory] * len(gz_files),
-                                   [log_directory] * len(gz_files)), total=len(gz_files), desc="📦 Decompressing .gz files",
+                                   [log_directory] * len(gz_files)), total=len(gz_files),
+                      desc="📦 Decompressing '.gz' files",
                       unit="file", ncols=100,
                       bar_format="(3/6) {desc}: |{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed})"))
 
@@ -110,7 +115,8 @@ class ELBLogAnalyzer:
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             futures = [executor.submit(self._parse_log_file, log_file, log_directory) for log_file in log_files]
-            for future in tqdm(concurrent.futures.as_completed(futures), total=len(log_files), desc="📝 Parsing log files",
+            for future in tqdm(concurrent.futures.as_completed(futures), total=len(log_files),
+                               desc="📝 Parsing log files",
                                unit="file", ncols=100,
                                bar_format="(4/6) {desc}: |{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed})"):
                 parsed_logs.extend(future.result())
@@ -335,54 +341,112 @@ class ELBLogAnalyzer:
         output_path = os.path.join(output_directory, f'{prefix.replace("/", "_")}_report.xlsx')
 
         max_rows_per_sheet = 1048576
-        with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
-            workbook = writer.book
-            workbook.strings_to_urls = False
+        try:
+            with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
+                workbook = writer.book
+                workbook.strings_to_urls = False
 
-            cell_format = workbook.add_format({'text_wrap': True, 'valign': 'vcenter'})
-            header_format = workbook.add_format({'bold': True, 'border': 1, 'text_wrap': True,'align': 'center', 'valign': 'vcenter'})
-            abuse_format = workbook.add_format(
-                {'bg_color': '#FFC7CE', 'font_color': '#9C0006', 'bold': True})
+                cell_format = workbook.add_format({'text_wrap': True, 'valign': 'vcenter'})
+                header_format = workbook.add_format(
+                    {'bg_color': '#D6EAF8', 'bold': True, 'border': 1, 'text_wrap': False, 'align': 'center',
+                     'valign': 'vcenter'})
+                abuse_format = workbook.add_format(
+                    {'bg_color': '#FF8080', 'font_color': '#000000', 'bold': True,
+                     'valign': 'vcenter'})  # 배경 연한 빨간색, 글자 검은색
 
-            for sheet_name, df in tqdm(data.items(), desc="📊 Creating excel sheets", unit="sheet", ncols=100,
-                                       bar_format="(6/6) {desc}: |{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed})"):
-                worksheet = writer.book.add_worksheet(sheet_name[:31])
-                if df.empty:
-                    worksheet.write(0, 0, "<<No data available for this section.>>")
-                    continue
+                try:
+                    # 'Top 100 Client IP' 시트에서 'Abuse'가 'Yes'인 IP를 수집합니다.
+                    abuse_ips = set()
+                    if 'Top 100 Client IP' in data:
+                        abuse_df = data['Top 100 Client IP']
+                        logger.info(f"Abuse IP 수집 시작 - 데이터프레임 크기: {abuse_df.shape}")
+                        abuse_ips.update(abuse_df[abuse_df['Abuse'] == 'Yes']['Client IP'])
+                        logger.info(f"Abuse IP 수집 완료 - 수집된 IP 개수: {len(abuse_ips)}")
+                except Exception as e:
+                    logger.error(f"❌ Error collecting Abuse IPs: {e}")
+                    raise e
 
-                if df.shape[0] > max_rows_per_sheet:
-                    df = df.iloc[:max_rows_per_sheet]
-                    logger.warning(
-                        f"⚠️ Data for sheet '{sheet_name}' exceeds {max_rows_per_sheet} rows and has been truncated.")
+                if not abuse_ips:
+                    logger.warning("⚠️ No Abuse IPs found.")
 
-                df.to_excel(writer, sheet_name=sheet_name[:31], index=False, header=False, startrow=1)
+                for sheet_name, df in tqdm(data.items(), desc="📊 Creating excel sheets", unit="sheet", ncols=100,
+                                           bar_format="(6/6) {desc}: |{bar}| {n_fmt}/{total_fmt} {percentage:3.0f}% (elapsed: {elapsed})"):
+                    try:
+                        logger.info(f"Creating sheet: {sheet_name}")
+                        worksheet = writer.book.add_worksheet(sheet_name[:31])
+                        if df.empty:
+                            worksheet.write(0, 0, "<<No data available for this section.>>")
+                            continue
 
-                worksheet = writer.sheets[sheet_name[:31]]
+                        if df.shape[0] > max_rows_per_sheet:
+                            df = df.iloc[:max_rows_per_sheet]
+                            logger.warning(
+                                f"⚠️ Data for sheet '{sheet_name}' exceeds {max_rows_per_sheet} rows and has been truncated.")
 
-                for col_num, value in enumerate(df.columns.values):
-                    worksheet.write(0, col_num, value, header_format)
+                        df.to_excel(writer, sheet_name=sheet_name[:31], index=False, header=False, startrow=1)
 
-                for column in df:
-                    column_length = max(df[column].astype(str).map(len).max(), len(column))
-                    col_idx = df.columns.get_loc(column)
-                    if column == 'Request':
-                        worksheet.set_column(col_idx, col_idx, 95, cell_format)
-                    elif column == 'Redirect URL':
-                        worksheet.set_column(col_idx, col_idx, 50, cell_format)
-                    else:
-                        worksheet.set_column(col_idx, col_idx, column_length, cell_format)
+                        worksheet = writer.sheets[sheet_name[:31]]
 
-                worksheet.autofilter(0, 0, df.shape[0], df.shape[1] - 1)
-                worksheet.freeze_panes(1, 0)
+                        for col_num, value in enumerate(df.columns.values):
+                            worksheet.write(0, col_num, value, header_format)
 
-                if 'Abuse' in df.columns:
-                    abuse_col_idx = df.columns.get_loc('Abuse')
-                    for row in range(1, df.shape[0] + 1):
-                        if df.at[row - 1, 'Abuse'] == 'Yes':
-                            worksheet.write(row, abuse_col_idx, df.at[row - 1, 'Abuse'], abuse_format)
+                        for column in df:
+                            column_length = max(df[column].astype(str).map(len).max(), len(column))
+                            col_idx = df.columns.get_loc(column)
+                            if column == 'Count':
+                                worksheet.set_column(col_idx, col_idx, 9, cell_format)
+                            elif column == 'Abuse':
+                                worksheet.set_column(col_idx, col_idx, 9, cell_format)
+                            elif column == 'Request':
+                                worksheet.set_column(col_idx, col_idx, 95, cell_format)
+                            elif column == 'Redirect URL':
+                                worksheet.set_column(col_idx, col_idx, 50, cell_format)
+                            elif column == 'ELB Status Code' or column == 'Backend Status Code':
+                                worksheet.set_column(col_idx, col_idx, 13, cell_format)
+                            elif column == 'Response time':
+                                worksheet.set_column(col_idx, col_idx, 12, cell_format)
+                            elif column == 'Timestamp':
+                                worksheet.set_column(col_idx, col_idx, 20, cell_format)
+                            else:
+                                worksheet.set_column(col_idx, col_idx, column_length, cell_format)
+
+                        worksheet.autofilter(0, 0, df.shape[0], df.shape[1] - 1)
+                        worksheet.freeze_panes(1, 0)
+
+                        if 'Abuse' in df.columns:
+                            abuse_col_idx = df.columns.get_loc('Abuse')
+                            for row in range(1, df.shape[0] + 1):
+                                if df.iloc[row - 1, abuse_col_idx] == 'Yes':
+                                    worksheet.write(row, abuse_col_idx, df.iloc[row - 1, abuse_col_idx], abuse_format)
+
+                        if 'Client IP' in df.columns:
+                            client_ip_col_idx = df.columns.get_loc('Client IP')
+                            for row in range(1, df.shape[0] + 1):
+                                client_ip = df.iloc[row - 1, client_ip_col_idx]
+                                if client_ip in abuse_ips:
+                                    worksheet.write(row, client_ip_col_idx, client_ip, abuse_format)
+                    except Exception as e:
+                        logger.error(f"❌ Error creating sheet '{sheet_name}': {e}")
+                        logger.debug(f"DataFrame content:\n{df.head(5)}")
+                        raise e
+        except Exception as e:
+            logger.error(f"❌ Failed to save Excel file: {e}")
+            raise e
+
         logger.info("✅ Report saved successfully.")
         logger.info(f"📁 Report File Path: {output_path}")
+        self.open_file_explorer(output_directory)
+
+    def open_file_explorer(self, path):
+        try:
+            if os.name == 'nt':  # Windows
+                os.startfile(path)
+            elif os.name == 'posix':  # macOS, Linux
+                subprocess.run(['open', path], check=True)
+            elif os.uname().sysname == 'Linux':  # Linux
+                subprocess.run(['xdg-open', path], check=True)
+        except Exception as e:
+            logger.error(f"❌ Failed to open file explorer: {e}")
 
     def clean_up(self, directories):
         for directory in directories:
