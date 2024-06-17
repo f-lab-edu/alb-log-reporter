@@ -9,13 +9,20 @@ logger = logging.getLogger()
 
 def get_intro_text():
     intro_text = """
-  ____  _      ____       _       ___    ____      ____     ___  ____   ___   ____  ______    ___  ____  
- /    || |    |    \\     | |     /   \\  /    |    |    \\   /  _]|    \\ /   \\ |    \\|      |  /  _]|    \\ 
-|  o  || |    |  o  )    | |    |     ||   __|    |  D  ) /  [_ |  o  )     ||  D  )      | /  [_ |  D  )
-|     || |___ |     |    | |___ |  O  ||  |  |    |    / |    _]|   _/|  O  ||    /|_|  |_||    _]|    / 
-|  _  ||     ||  O  |    |     ||     ||  |_ |    |    \\ |   [_ |  |  |     ||    \\  |  |  |   [_ |    \\ 
-|  |  ||     ||     |    |     ||     ||     |    |  .  \\|     ||  |  |     ||  .  \\ |  |  |     ||  .  \\ 
-|__|__||_____||_____|    |_____| \\___/ |___,_|    |__|\\_||_____||__|   \\___/ |__|\\_| |__|  |_____||__|\\_|
+ _______  ___      _______    ___      _______  _______                  
+|   _   ||   |    |  _    |  |   |    |       ||       |                 
+|  |_|  ||   |    | |_|   |  |   |    |   _   ||    ___|                 
+|       ||   |    |       |  |   |    |  | |  ||   | __                  
+|       ||   |___ |  _   |   |   |___ |  |_|  ||   ||  |                 
+|   _   ||       || |_|   |  |       ||       ||   |_| |                 
+|__| |__||_______||_______|  |_______||_______||_______|                 
+ ______    _______  _______  _______  ______  _______  _______  ______   
+|    _ |  |       ||       ||       ||    _ ||       ||       ||    _ |  
+|   | ||  |    ___||    _  ||   _   ||   | |||_     _||    ___||   | ||  
+|   |_||_ |   |___ |   |_| ||  | |  ||   |_||_ |   |  |   |___ |   |_||_ 
+|    __  ||    ___||    ___||  |_|  ||    __  ||   |  |    ___||    __  |
+|   |  | ||   |___ |   |    |       ||   |  | ||   |  |   |___ |   |  | |
+|___|  |_||_______||___|    |_______||___|  |_||___|  |_______||___|  |_|
 
 Author: @eunch
 email: manatee569@anglernook.com
@@ -57,12 +64,12 @@ def clean_directory(directory):
 
 def download_abuseipdb(
         url="https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/main/abuseipdb-s100-30d.ipv4"):
-    logger.info("🌐 Starting update from AbuseIP data list.")
+    logger.info("🌐 Starting update Abuse IP.")
     try:
         response = requests.get(url)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
-        logger.error(f"❌ Failed to updated data from AbuseIPDB. Reason: {e}")
+        logger.error(f"❌ Failed to updated Abuse IP data. Reason: {e}")
         return None
-    logger.info("✅ Successfully updated data from AbuseIPDB.")
+    logger.info("✅ Updated Abuse IP.")
     return set(response.text.splitlines())

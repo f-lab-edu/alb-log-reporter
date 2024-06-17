@@ -452,7 +452,7 @@ class ELBLogAnalyzer:
             logger.error(f"❌ Failed to save Excel file: {e}")
             raise e
 
-        logger.info("✅ Report saved successfully.")
+        logger.info("✅ Report saved.")
         logger.info(f"📁 Report File Path: {output_path}")
         self.open_file_explorer(output_directory)
 
