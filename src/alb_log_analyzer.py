@@ -42,7 +42,7 @@ class ELBLogAnalyzer:
         logger.info(f"⏰ Analysis period: {self.start_datetime} ~ {self.end_datetime}")
         for page in tqdm(paginator.paginate(Bucket=self.bucket_name, Prefix=self.prefix),
                          desc="🔍 Scanning ALB log list", unit="page", ncols=100,
-                         bar_format="(1/6) {desc}: {n_fmt} files (elapsed: {elapsed})"):
+                         bar_format="(1/6) {desc} (elapsed: {elapsed})"):
             if 'Contents' not in page:
                 logger.warning(f"⚠️ No logs found in the specified prefix: s3://{self.bucket_name}/{self.prefix}")
                 continue

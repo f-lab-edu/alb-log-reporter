@@ -113,7 +113,7 @@ class AWSSSOHelper:
 
     def _prompt_user_to_authorize(self, verification_url, device_code, expires_in, interval, client_creds):
         logger.info("🔗 Opening device verification URL in browser...")
-        logger.info(f"   {verification_url}")
+        logger.info(f"    {verification_url}")
         webbrowser.open(verification_url, autoraise=True)
 
         for _ in range(0, expires_in // interval):

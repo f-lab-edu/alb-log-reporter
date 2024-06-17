@@ -20,35 +20,12 @@ logger = logging.getLogger()
 MAX_RETRIES = 3  # Maximum number of retries for token refresh
 
 
-def is_sso_profile(profile_name):
-    config = configparser.ConfigParser()
-    config_path = os.path.expanduser("~/.aws/config")
-    config.read(config_path)
-    profile_section = f"profile {profile_name}"
-    return config.has_section(profile_section) and 'sso_start_url' in config[profile_section]
-
-
 def is_sso_session_profile(profile_name):
     config = configparser.ConfigParser()
     config_path = os.path.expanduser("~/.aws/config")
     config.read(config_path)
     session_section = f"sso-session {profile_name}"
     return config.has_section(session_section)
-
-
-def get_sso_profile_info(profile_name):
-    config = configparser.ConfigParser()
-    config_path = os.path.expanduser("~/.aws/config")
-    config.read(config_path)
-    profile_section = f"profile {profile_name}"
-    if config.has_section(profile_section):
-        sso_start_url = config.get(profile_section, 'sso_start_url')
-        sso_region = config.get(profile_section, 'sso_region')
-        sso_account_id = config.get(profile_section, 'sso_account_id', fallback=None)
-        sso_role_name = config.get(profile_section, 'sso_role_name', fallback=None)
-        sso_session = config.get(profile_section, 'sso_session')
-        return sso_start_url, sso_region, sso_account_id, sso_role_name, sso_session
-    raise ValueError(f"❌ SSO profile {profile_name} is missing required fields.")
 
 
 def get_sso_session_profile_info(profile_name):
@@ -72,20 +49,7 @@ def is_access_key_profile(profile_name):
 
 def create_aws_session(profile_name, profile_type):
     try:
-        if profile_type == 'profile':
-            if is_sso_profile(profile_name):
-                logger.info(f"✔️ Using AWS SSO profile: {profile_name}")
-                sso_start_url, sso_region, sso_account_id, sso_role_name, sso_session = get_sso_profile_info(
-                    profile_name)
-                sso_helper = AWSSSOHelper(start_url=sso_start_url, session_name=sso_session, region_name=sso_region)
-                if not sso_helper.token_cache:
-                    logger.info(
-                        f"🔒 Profile {profile_name} is not device authenticated. ⏳ Starting device authorization flow...")
-                    sso_helper._start_device_authorization_flow()
-                return sso_helper, sso_account_id, sso_role_name
-            else:
-                raise ValueError(f"❌ Profile {profile_name} not found or not configured correctly for SSO.")
-        elif profile_type == 'sso-session':
+        if profile_type == 'sso-session':
             if is_sso_session_profile(profile_name):
                 logger.info(f"✔️ Using AWS SSO session profile: {profile_name}")
                 sso_start_url, sso_region = get_sso_session_profile_info(profile_name)
@@ -122,8 +86,8 @@ def parse_args():
         formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument('-p', '--profile', default='default', help='AWS profile name (default: default)')
-    parser.add_argument('-t', '--profile-type', choices=['access_key', 'profile', 'sso-session'], required=True,
-                        help='The type of AWS profile to use: "profile" for SSO profiles, "sso-session" for SSO session profiles, or "access_key" for access key profiles.')
+    parser.add_argument('-t', '--profile-type', choices=['access_key', 'sso-session'], required=True,
+                        help='The type of AWS profile to use: "sso-session" for SSO session profiles, or "access_key" for access key profiles.')
     parser.add_argument('-b', '--bucket', required=True,
                         help='S3 URI of the ELB logs, e.g., s3://{your-bucket-name}/AWSLogs/{account_id}/elasticloadbalancing/{region}/')
     parser.add_argument('-s', '--start', required=True, help='Start datetime in YYYY-MM-DD HH:MM format')
@@ -181,7 +145,7 @@ def main():
 
     aws_session, sso_account_id, sso_role_name = create_aws_session(args.profile, args.profile_type)
 
-    if args.profile_type == 'profile' or args.profile_type == 'sso-session':
+    if args.profile_type == 'sso-session':
         if not sso_account_id or not sso_role_name:
             retries = 0
             while retries < MAX_RETRIES:
