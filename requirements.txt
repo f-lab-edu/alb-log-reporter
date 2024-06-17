@@ -5,3 +5,4 @@ xlsxwriter
 pytz
 tqdm
 requests
+prettytable
