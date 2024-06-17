@@ -142,16 +142,7 @@ python main.py -p production -t sso-session -b s3://logs-bucket/AWSLogs/11111111
 [sso-session example1]
 sso_start_url = https://example1.awsapps.com/start/#/
 sso_region = ap-northeast-2
-sso_registration_scopes =
-
- sso:account:access
-
-[profile readonly-sso-role-117630110551]
-sso_start_url = https://example1.awsapps.com/start/#/
-sso_session = eunch
-sso_account_id = 123456789012
-sso_role_name = readonly-sso-role
-sso_region = ap-northeast-2
+sso_registration_scopes = sso:account:access
 ```
 
 ### Standard AWS Credentials Profile 설정 예제
