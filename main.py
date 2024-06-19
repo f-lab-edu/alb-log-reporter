@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import configparser
 import logging
 import os
@@ -173,7 +173,16 @@ def main():
                 account_table.add_row([i + 1, account_info['accountName'], account_id])
             print(account_table)
 
-            selected_account_index = int(input("\n➡️ Select an account by number: ")) - 1
+            while True:
+                try:
+                    selected_account_index = int(input("\n➡️ Select an account by number: ")) - 1
+                    if 0 <= selected_account_index < len(sorted_accounts):
+                        break
+                    else:
+                        logger.error("❌ Invalid number. Please enter a number corresponding to an account.")
+                except ValueError:
+                    logger.error("❌ Invalid input. Please enter a valid number.")
+
             selected_account_id = sorted_accounts[selected_account_index][0]
             print(
                 f"\n✔️ Selected account: {sorted_accounts[selected_account_index][1]['accountName']} ({selected_account_id})\n")
@@ -186,7 +195,16 @@ def main():
                 role_table.add_row([i + 1, role])
             print(role_table)
 
-            selected_role_index = int(input("\n➡️ Select a role by number: ")) - 1
+            while True:
+                try:
+                    selected_role_index = int(input("\n➡️ Select a role by number: ")) - 1
+                    if 0 <= selected_role_index < len(roles):
+                        break
+                    else:
+                        logger.error("❌ Invalid number. Please enter a number corresponding to a role.")
+                except ValueError:
+                    logger.error("❌ Invalid input. Please enter a valid number.")
+
             selected_role_name = roles[selected_role_index]
             print(f"\n✔️ Selected role: {selected_role_name}\n")
 
@@ -215,7 +233,6 @@ def main():
         except Exception as e:
             logger.error(f"❌ An error occurred: {e}")
             break
-
 
 if __name__ == '__main__':
     main()
