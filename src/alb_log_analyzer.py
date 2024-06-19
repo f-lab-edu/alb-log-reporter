@@ -335,8 +335,8 @@ class ELBLogAnalyzer:
         return df[['Count', 'Client IP', 'Abuse']]
 
     def _create_top_request_url_dataframe(self, top_request_urls):
-        df = pd.DataFrame(top_request_urls, columns=['Request URL', 'Count'])
-        return df[['Count', 'Request URL']]
+        df = pd.DataFrame(top_request_urls, columns=['Request', 'Count'])
+        return df[['Count', 'Request']]
 
     def _create_top_user_agents_dataframe(self, top_user_agents):
         df = pd.DataFrame(top_user_agents, columns=['User Agent', 'Count'])
@@ -345,7 +345,7 @@ class ELBLogAnalyzer:
     def save_to_excel(self, data, prefix, script_start_time):
         timestamp = script_start_time.strftime('%Y%m%d_%H%M%S')
         output_directory = create_directory(f'./data/output/{timestamp}')
-        output_path = os.path.join(output_directory, f'{prefix.replace("/", "_")}_report.xlsx')
+        output_path = os.path.join(output_directory, f'{prefix.replace("/", "_")}{timestamp}_report.xlsx')
 
         ordered_sheet_names = [
             'Top 100 Client IP', 'Top 100 Request URL', 'Top 100 User Agents', 'Top 100 Response Time',
@@ -361,15 +361,13 @@ class ELBLogAnalyzer:
                 workbook.strings_to_urls = False
 
                 cell_format = workbook.add_format({'text_wrap': True, 'valign': 'vcenter', 'border': 1})
-                timestamp_format = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1})
+                center_format = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1})
                 header_format = workbook.add_format(
                     {'bg_color': '#D6EAF8', 'bold': True, 'border': 1, 'text_wrap': False, 'align': 'center',
                      'valign': 'vcenter'})
                 abuse_format = workbook.add_format(
-                    {'bg_color': '#FF8080', 'font_color': '#000000', 'bold': True, 'valign': 'vcenter', 'border': 1})
-                no_data_format = workbook.add_format(
-                    {'bg_color': '#FFFF00', 'font_color': '#FF0000', 'bold': True, 'valign': 'vcenter',
-                     'align': 'center', 'border': 1})
+                    {'bg_color': '#FF8080', 'font_color': '#000000', 'bold': True, 'align': 'center',
+                     'valign': 'vcenter', 'border': 1})
 
                 abuse_ips = set()
                 if 'Top 100 Client IP' in data:
@@ -401,8 +399,9 @@ class ELBLogAnalyzer:
 
                         for row in range(1, current_df.shape[0] + 1):
                             for col_num in range(current_df.shape[1]):
-                                if current_df.columns[col_num] == 'Timestamp':
-                                    worksheet.write(row, col_num, current_df.iloc[row - 1, col_num], timestamp_format)
+                                if current_df.columns[col_num] in ['Timestamp', 'Client IP', 'Target IP',
+                                                                   'ELB Status Code', 'Backend Status Code', 'Abuse']:
+                                    worksheet.write(row, col_num, current_df.iloc[row - 1, col_num], center_format)
                                 else:
                                     worksheet.write(row, col_num, current_df.iloc[row - 1, col_num], cell_format)
 
@@ -412,17 +411,19 @@ class ELBLogAnalyzer:
                             if column == 'Count':
                                 worksheet.set_column(col_idx, col_idx, 9, cell_format)
                             elif column == 'Abuse':
-                                worksheet.set_column(col_idx, col_idx, 9, cell_format)
+                                worksheet.set_column(col_idx, col_idx, 9, center_format)
                             elif column == 'Request':
                                 worksheet.set_column(col_idx, col_idx, 95, cell_format)
                             elif column == 'Redirect URL':
                                 worksheet.set_column(col_idx, col_idx, 50, cell_format)
-                            elif column == 'ELB Status Code' or column == 'Backend Status Code':
-                                worksheet.set_column(col_idx, col_idx, 13, cell_format)
+                            elif column in ['ELB Status Code', 'Backend Status Code']:
+                                worksheet.set_column(col_idx, col_idx, 10, center_format)
+                            elif column in ['Client IP', 'Target IP']:
+                                worksheet.set_column(col_idx, col_idx, 15, center_format)
                             elif column == 'Response time':
                                 worksheet.set_column(col_idx, col_idx, 12, cell_format)
                             elif column == 'Timestamp':
-                                worksheet.set_column(col_idx, col_idx, 20, timestamp_format)
+                                worksheet.set_column(col_idx, col_idx, 20, center_format)
                             else:
                                 worksheet.set_column(col_idx, col_idx, column_length, cell_format)
 
